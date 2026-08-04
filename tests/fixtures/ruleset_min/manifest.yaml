@@ -1,0 +1,2 @@
+version: test-fixture
+description: resolver·린터 테스트용 최소 룰셋. 실제 계산에 쓰지 않는다.

@@ -1,0 +1,13 @@
+# 인증키는 절대 커밋하지 않는다. 환경변수로만 쓴다.
+.env
+.streamlit/secrets.toml
+*.key
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# 스크래치
+*.tmp
+_scratch/

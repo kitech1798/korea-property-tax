@@ -1,0 +1,16 @@
+[theme]
+# 화면 토큰은 ui/theme.py의 CSS가 담당한다. 여기서는 Streamlit 기본 위젯 색만 맞춘다.
+base = "light"
+primaryColor = "#1f5eff"
+backgroundColor = "#f7f8fa"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#14181f"
+
+[server]
+port = 8555
+headless = true
+# 이 앱은 사용자가 입력한 값만 다루고 파일 업로드가 없다.
+maxUploadSize = 1
+
+[browser]
+gatherUsageStats = false

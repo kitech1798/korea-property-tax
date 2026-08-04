@@ -1,0 +1,153 @@
+# 종합부동산세 주택 수 특례 · 합산배제.
+#
+# ★ 두 가지를 구분해야 한다. 섞으면 세액이 통째로 틀린다.
+#
+#   ① 주택 수 제외 (종부세법 §8④, 시행령 §4의2·§4의3③)
+#      1세대1주택자 판정에서만 빼준다. 과세표준에는 **그대로 합산된다**.
+#      → 상속주택, 일시적 2주택(신규주택), 지방 저가주택 등
+#
+#   ② 합산배제 (종부세법 §8②, 시행령 §3)
+#      과세표준 합산 자체에서 빠진다. 즉 세금이 안 붙는다.
+#      → 등록 임대주택, 사원용 주택, 미분양주택 등
+#
+# 시중 계산기는 이 판정을 아예 하지 않고 "예외 규정이 있으니 관할 세무서 문의"로
+# 회피한다. 그런데 종부세를 실제로 내는 사람 상당수가 이 특례에 걸린다.
+#
+# 값 출처: 법제처 Open API (종합부동산세법 시행령 MST 283639)
+# 원문 확인: python tools/show_law.py 종합부동산세법_시행령 4-2 4-3 3
+
+---
+rule_id: jongbuse.special.inheritance
+unit: spec
+description: |
+  상속주택 주택 수 제외(종부령 §4의2②, §4의3③3나).
+  세 요건 중 **하나만** 충족하면 주택 수에서 빠진다(누적 조건이 아니다).
+blocks:
+  - id: inh-current
+    tracks: [current, reform]
+    effective_from: 2022-01-01
+    basis: {law: 종합부동산세법 시행령, article: "4-2", clause: "2", mst: "283639"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=283639&JO=000402", fetched_at: 2026-08-04}
+    certainty: enacted
+    payload:
+      any_of:
+        - {key: within_years, years: 5, label: "상속개시일부터 5년이 경과하지 않은 주택"}
+        - {key: small_share, max_share: "0.40", label: "지분율이 100분의 40 이하인 주택"}
+        - key: low_value
+          max_value_capital: 600000000
+          max_value_other: 300000000
+          label: "지분율에 상당하는 공시가격이 6억원(수도권 밖 3억원) 이하인 주택"
+      note: "조합원입주권·분양권을 상속받아 사업시행 완료 후 취득한 신축주택 포함"
+
+---
+rule_id: jongbuse.special.temporary_two
+unit: spec
+description: |
+  일시적 2주택 특례(종부령 §4의2①). 종전주택을 팔기 전에 신규주택을 취득해
+  2주택이 된 경우, 신규주택을 주택 수에서 빼고 1세대1주택자로 본다.
+
+  ★ 개편안이 조정대상지역 간 이동에 한해 3년 → 2년으로 단축한다.
+    적용시기: 2026.8.4. 이후 신규 취득분, 2027.6.1. 기준 납세의무 성립분부터.
+    경과조치: 2026.8.3. 이전 취득 또는 매매계약 체결·계약금 지급분은 종전 규정.
+blocks:
+  - id: tmp2-current-3y
+    tracks: [current]
+    effective_from: 2022-01-01
+    basis: {law: 종합부동산세법 시행령, article: "4-2", clause: "1", mst: "283639"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=283639&JO=000402", fetched_at: 2026-08-04}
+    certainty: enacted
+    payload: {years: 3}
+
+  - id: tmp2-reform-general-3y
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {adjusted_to_adjusted: false}
+    basis: {law: 종합부동산세법 시행령, article: "4-2", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 21}
+    certainty: bill_pending
+    payload: {years: 3}
+    note: "비조정→조정, 조정→비조정, 비조정→비조정은 현행과 같이 3년"
+
+  - id: tmp2-reform-adjusted-2y
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {adjusted_to_adjusted: true}
+    basis: {law: 종합부동산세법 시행령, article: "4-2", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 21}
+    certainty: bill_pending
+    payload:
+      years: 2
+      grandfather_before: 2026-08-04
+    note: "조정대상지역 주택 보유 상태에서 조정대상지역 신규 취득 시 2년으로 단축"
+
+---
+rule_id: jongbuse.special.rural_low_price
+unit: spec
+description: |
+  지방 저가주택 특례(종부령 §4의2③). 공시가격 4억원 이하 + 지역 요건을 모두 충족하는
+  1주택을 주택 수에서 뺀다.
+
+  개편안(조특법 §71의2)이 대상 지역과 가액 상한을 넓히지만, 그 확대분은 조세특례제한법
+  소관이라 이 규칙과 별개다. 여기서는 종부령 본칙만 담는다.
+blocks:
+  - id: rural-current
+    tracks: [current, reform]
+    effective_from: 2022-01-01
+    basis: {law: 종합부동산세법 시행령, article: "4-2", clause: "3", mst: "283639"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=283639&JO=000402", fetched_at: 2026-08-04}
+    certainty: enacted
+    payload:
+      max_value: 400000000
+      all_of:
+        - "공시가격이 4억원 이하일 것"
+        - "수도권 밖의 광역시·특별자치시가 아닌 지역, 광역시 소속 군, 세종시 읍·면 등에 소재할 것"
+      auto_applied_from: 2027-01-01
+      auto_applied_note: |
+        현행은 관할 세무서장에게 신청해야 특례가 적용된다.
+        개편안은 지방 저가주택에 한해 **신청 없이도 적용**하도록 바꾼다(상세본 p.206).
+
+---
+rule_id: jongbuse.special.rental_exclusion
+unit: spec
+description: |
+  합산배제 임대주택(종부세법 §8②, 시행령 §3).
+
+  ★ 위 특례들과 성격이 다르다. 주택 수만 빼주는 게 아니라 **과세표준 합산에서 제외**된다.
+    즉 그 주택에는 종부세가 붙지 않는다.
+
+  요건이 임대유형·등록시기·가액·면적·임대료 증액률에 따라 잘게 갈리고, 조정대상지역
+  매입임대 아파트는 개편안에서 단계적으로 배제된다. 엔진은 사용자가 제공한 사실만으로
+  판정하고, 모자라면 판정하지 않는다.
+blocks:
+  - id: rental-current
+    tracks: [current, reform]
+    effective_from: 2021-01-01
+    basis: {law: 종합부동산세법, article: "8", clause: "2", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000800", fetched_at: 2026-08-04}
+    certainty: enacted
+    payload:
+      requires_registration: true
+      requires_rent_cap: true
+      rent_increase_cap: "0.05"
+      excluded_from_aggregate: true
+      undecidable_note: |
+        임대유형·등록시기·가액요건·의무임대기간 충족 여부는 등록증과 임대차계약으로만
+        확인된다. 엔진은 '요건을 만족한다고 사용자가 확인한 경우'에만 합산배제하고,
+        그 사실을 감사 추적에 남긴다.
+
+---
+rule_id: jongbuse.special.capital_area_codes
+unit: spec
+description: |
+  수도권 판정. 상속주택 저가 기준이 수도권 6억 / 수도권 밖 3억으로 갈린다.
+  「수도권정비계획법」 §2 1호 — 서울특별시, 인천광역시, 경기도.
+blocks:
+  - id: capital-2001
+    tracks: [current, reform]
+    effective_from: 2001-01-01
+    basis: {law: 수도권정비계획법, article: "2", clause: "1"}
+    source: {kind: manual, note: "수도권정비계획법 §2 1호 및 시행령 §2"}
+    certainty: enacted
+    payload:
+      prefixes: ["11", "28", "41"]
+      names: {"11": 서울특별시, "28": 인천광역시, "41": 경기도}

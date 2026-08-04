@@ -1,0 +1,208 @@
+# 재산세 주택분 — 지방세법.
+#
+# 이번 2026.8.3 세제개편안에 재산세 개정 항목은 없다(지방세는 국세인 세제개편안
+# 대상 11개 법률에 포함되지 않는다). 따라서 두 트랙 모두 현행법을 쓴다.
+#
+# 값은 전부 법제처 Open API로 받은 조문 원문에서 옮겼다.
+# 원문 확인:  python tools/show_law.py 지방세법 111 110 111-2 112 122
+#            python tools/show_law.py 지방세법_시행령 109
+#
+# ⚠ YAML 주의: 세법 문서의 연도 약칭('27, '28)을 따옴표 없이 쓰면 인용부호로
+#   파싱된다. 문자열은 반드시 큰따옴표로 감싼다.
+
+---
+rule_id: property_tax.house.fair_market_ratio
+unit: rate
+description: |
+  재산세 주택분 공정시장가액비율. 법률은 40~80% 범위만 정하고 실제 비율은 시행령이 정한다.
+
+  ★ 43/44/45% 특례는 2026년도에 성립하는 납세의무에 한정된다(시행령 §109①2 단서).
+    2027년 이후는 시행령이 다시 정하지 않는 한 60%로 돌아간다. 이 불확실성을
+    숨기지 않고 decree_pending으로 표시한다.
+blocks:
+  - id: fmv-2026-one-house-under-3
+    tracks: [current, reform]
+    effective_from: 2026-01-01
+    effective_to: 2026-12-31
+    selector: {one_house_special: true, price_band: "~3억"}
+    basis: {law: 지방세법 시행령, article: "109", clause: "1", item: "2", mst: "287223"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=287223&JO=010900", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: "0.43"
+
+  - id: fmv-2026-one-house-3-to-6
+    tracks: [current, reform]
+    effective_from: 2026-01-01
+    effective_to: 2026-12-31
+    selector: {one_house_special: true, price_band: "3~6억"}
+    basis: {law: 지방세법 시행령, article: "109", clause: "1", item: "2", mst: "287223"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=287223&JO=010900", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: "0.44"
+
+  - id: fmv-2026-one-house-over-6
+    tracks: [current, reform]
+    effective_from: 2026-01-01
+    effective_to: 2026-12-31
+    selector: {one_house_special: true, price_band: "6억~"}
+    basis: {law: 지방세법 시행령, article: "109", clause: "1", item: "2", mst: "287223"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=287223&JO=010900", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: "0.45"
+    note: "시행령 단서가 '시가표준액이 9억원을 초과하는 주택을 포함한다'고 명시하므로 고가 1주택도 45%다"
+
+  - id: fmv-general
+    tracks: [current, reform]
+    effective_from: 2023-01-01
+    selector: {one_house_special: false}
+    basis: {law: 지방세법 시행령, article: "109", clause: "1", item: "2", mst: "287223"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=287223&JO=010900", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: "0.60"
+
+  - id: fmv-2027-onward-one-house-assumed
+    tracks: [current, reform]
+    effective_from: 2027-01-01
+    selector: {one_house_special: true}
+    basis: {law: 지방세법 시행령, article: "109", clause: "1", item: "2", mst: "287223"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=287223&JO=010900", fetched_at: 2026-08-04}
+    certainty: decree_pending
+    value: "0.45"
+    note: |
+      43~45% 특례는 조문상 2026년도 한정이다. 2027년 이후 비율은 매년 시행령으로 정해진다.
+      정부 세제개편안 문답자료(p.44·p.46~47)의 2027~2028년 사례가 재산세를 2026년과
+      동일하게 표시하므로, 특례 연장을 전제로 계산한 것으로 보고 45%를 기본값으로 둔다.
+      확정이 아니므로 decree_pending — 화면에 "시행령 미정" 배지가 뜬다.
+
+---
+rule_id: property_tax.house.rate_table_standard
+unit: rate
+description: |
+  주택분 재산세 표준세율(지방세법 §111①3나). 법문이 "기초금액 + 초과금액의 세율"
+  형식으로 적혀 있으므로 base_amount 형식을 그대로 쓴다. 화면 대입식이 조문과
+  글자 그대로 같아야 사용자가 검증할 수 있다.
+blocks:
+  - id: rt-standard
+    tracks: [current, reform]
+    effective_from: 2005-01-01
+    basis: {law: 지방세법, article: "111", clause: "1", item: "3", mst: "282559"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=282559&JO=011100", fetched_at: 2026-08-04}
+    certainty: enacted
+    table:
+      - {upto: 60000000, rate: "0.001"}
+      - {upto: 150000000, rate: "0.0015", base_amount: 60000}
+      - {upto: 300000000, rate: "0.0025", base_amount: 195000}
+      - {upto: null, rate: "0.004", base_amount: 570000}
+
+---
+rule_id: property_tax.house.rate_table_one_house
+unit: rate
+description: |
+  1세대 1주택 세율 특례(지방세법 §111의2①).
+
+  ★ 시가표준액 9억원 이하 주택에만 적용된다. 공시가격 9억 초과 1주택자는
+    특례세율이 아니라 표준세율을 쓴다. 이 경계를 놓치면 고가 1주택의 세액이
+    통째로 틀린다.
+blocks:
+  - id: rt-one-house
+    tracks: [current, reform]
+    effective_from: 2023-01-01
+    basis: {law: 지방세법, article: "111-2", clause: "1", mst: "282559"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=282559&JO=011102", fetched_at: 2026-08-04}
+    certainty: enacted
+    table:
+      - {upto: 60000000, rate: "0.0005"}
+      - {upto: 150000000, rate: "0.001", base_amount: 30000}
+      - {upto: 300000000, rate: "0.002", base_amount: 120000}
+      - {upto: null, rate: "0.0035", base_amount: 420000}
+
+---
+rule_id: property_tax.house.one_house_rate_price_cap
+unit: KRW
+description: 1세대1주택 세율 특례의 시가표준액 상한(지방세법 §111의2① 괄호).
+blocks:
+  - id: cap-900m
+    tracks: [current, reform]
+    effective_from: 2023-01-01
+    basis: {law: 지방세법, article: "111-2", clause: "1", mst: "282559"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=282559&JO=011102", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: 900000000
+
+---
+rule_id: property_tax.house.urban_area_rate
+unit: rate
+description: |
+  재산세 도시지역분(지방세법 §112①2). 과세표준 × 1.4/1000.
+  조례로 2.3/1000까지 다르게 정할 수 있고(§112②), 도시지역 밖은 부과하지 않는다.
+  시중 계산기는 이 두 가지를 묻지 않고 전국에 일률 부과한다.
+blocks:
+  - id: urban-standard
+    tracks: [current, reform]
+    effective_from: 2011-01-01
+    basis: {law: 지방세법, article: "112", clause: "1", item: "2", mst: "282559"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=282559&JO=011200", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: "0.0014"
+    note: "조례 상한 0.0023 (§112②)"
+
+---
+rule_id: property_tax.house.local_education_rate
+unit: rate
+description: |
+  지방교육세(지방세법 §151①2). 재산세액의 20%.
+  ★ 도시지역분은 과세표준에 포함되지 않는다. 이걸 포함시키면 세액이 과대계상된다.
+blocks:
+  - id: edu-20pct
+    tracks: [current, reform]
+    effective_from: 2011-01-01
+    basis: {law: 지방세법, article: "151", clause: "1", item: "2", mst: "282559"}
+    source: {kind: manual, note: "지방세법 §151①2 — 재산세액(도시지역분 제외)의 100분의 20"}
+    certainty: enacted
+    value: "0.20"
+
+---
+rule_id: property_tax.house.taxbase_cap_rate
+unit: rate
+description: |
+  주택 과세표준상한율(지방세법 §110③).
+
+  ★ 2023년 개편으로 주택 재산세의 세부담상한(§122)은 폐지되고 과세표준상한제로
+    바뀌었다. §122 단서가 "다만, 주택의 경우에는 적용하지 아니한다"라고 명시한다.
+    시중 계산기와 해설이 아직도 105/110/130% 세부담상한을 말하는 것은 폐지된 제도다.
+
+  과세표준상한액 = 직전연도 과세표준 상당액 + (당해 시가표준액 과세표준 × 상한율)
+  상한율은 0~5% 범위에서 대통령령으로 정한다.
+blocks:
+  - id: cap-rate-5pct
+    tracks: [current, reform]
+    effective_from: 2024-01-01
+    basis: {law: 지방세법 시행령, article: "109-2", clause: "2", mst: "287223"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=287223&JO=010902", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: "0.05"
+    note: |
+      ⚠️ 2026-08-04 감사에서 정정: certainty가 decree_pending이었는데, 시행령에
+         **확정값이 이미 있다.** 지방세법 시행령 §109의2②:
+           "법 제110조제3항의 계산식에서 '대통령령으로 정하는 비율'이란 100분의 5를 말한다"
+         법률(§110③)이 위임한 값을 시행령이 이미 정했으므로 enacted다.
+
+      확정된 값을 미확정으로 표시하면, 과표상한이 실제로 걸린 재산세 결과에
+      근거 없는 '시행령 미정' 배지가 뜬다. 확실성 3축이 이 서비스의 핵심 주장인데
+      반대 방향의 오류도 신뢰를 똑같이 깎는다.
+
+---
+rule_id: property_tax.house.burden_cap
+unit: rate
+description: |
+  주택 재산세 세부담상한 — 폐지됨(지방세법 §122 단서).
+  값이 아니라 '적용 안 함'을 명시적으로 데이터에 남긴다. 규칙이 없어서 안 쓴 것과
+  법이 배제해서 안 쓴 것은 다르고, 후자는 감사 추적에 드러나야 한다.
+blocks:
+  - id: burden-cap-not-applicable
+    tracks: [current, reform]
+    effective_from: 2024-01-01
+    basis: {law: 지방세법, article: "122", mst: "282559"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=282559&JO=012200", fetched_at: 2026-08-04}
+    certainty: enacted
+    payload: {applicable: false, replaced_by: property_tax.house.taxbase_cap_rate}

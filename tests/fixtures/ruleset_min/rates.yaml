@@ -1,0 +1,57 @@
+rule_id: test.rate_table
+unit: rate
+description: |
+  종부세 주택분 세율. 개편안이 '27과 '28에 서로 다른 표를 쓰는 구조를 그대로 담는다.
+  세율을 문자열로 적는 것은 부동소수점 오차를 막기 위한 규약이다.
+blocks:
+  - id: rt-current-1to2
+    tracks: [current]
+    effective_from: 2023-01-01
+    selector: {taxpayer: individual, house_group: "1-2"}
+    basis: {law: 종합부동산세법, article: "9", clause: "1", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=law&MST=280417"}
+    certainty: enacted
+    table:
+      - {upto: 300000000, rate: "0.005"}
+      - {upto: 600000000, rate: "0.007"}
+      - {upto: 1200000000, rate: "0.010"}
+      - {upto: 2500000000, rate: "0.013"}
+      - {upto: 5000000000, rate: "0.015"}
+      - {upto: 9400000000, rate: "0.020"}
+      - {upto: null, rate: "0.027"}
+
+  - id: rt-reform-2027-1to2
+    tracks: [reform]
+    effective_from: 2027-01-01
+    effective_to: 2027-12-31
+    selector: {taxpayer: individual, house_group: "1-2"}
+    basis: {law: 종합부동산세법, article: "9", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    table:
+      - {upto: 300000000, rate: "0.005"}
+      - {upto: 600000000, rate: "0.007"}
+      - {upto: 1200000000, rate: "0.013"}
+      - {upto: 2500000000, rate: "0.015"}
+      - {upto: 5000000000, rate: "0.020"}
+      - {upto: 9400000000, rate: "0.027"}
+      - {upto: null, rate: "0.035"}
+
+  - id: rt-reform-2028-all
+    tracks: [reform]
+    effective_from: 2028-01-01
+    selector: {taxpayer: individual}
+    basis: {law: 종합부동산세법, article: "9", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    # 주의: 세법 문서의 연도 약칭(’27, ’28)을 YAML에 그대로 쓰면 아포스트로피가
+    # 인용부호로 파싱된다. 반드시 큰따옴표로 감싼다.
+    note: "2028년부터 주택 수와 무관하게 가액 기준 단일 세율표"
+    table:
+      - {upto: 300000000, rate: "0.005"}
+      - {upto: 600000000, rate: "0.007"}
+      - {upto: 1200000000, rate: "0.013"}
+      - {upto: 2500000000, rate: "0.020"}
+      - {upto: 5000000000, rate: "0.030"}
+      - {upto: 9400000000, rate: "0.040"}
+      - {upto: null, rate: "0.050"}
