@@ -1,0 +1,537 @@
+# 종합부동산세 주택분.
+#
+# 현행법(current)과 2026.8.3 개편안(reform) 두 트랙을 함께 담는다.
+# 개편안은 국회 미통과이므로 certainty를 bill_pending으로 표시하고, 화면에는
+# "국회 미통과" 배지가 뜬다. 두 트랙을 나란히 보여주지 않는 것 자체가 오류다.
+#
+# 현행법 값 출처: 법제처 Open API (종합부동산세법 MST 280417, 시행령 MST 283639)
+# 개편안 값 출처: 2026년 세제개편안 개조식 p.18~19 (corpus/reform_2026/개조식.md)
+#
+# ⚠ YAML: 연도 약칭(’27)을 따옴표 없이 쓰면 인용부호로 파싱된다. 문자열은 큰따옴표로.
+
+---
+rule_id: jongbuse.house.taxable_threshold
+unit: KRW
+description: |
+  주택분 종부세 **과세대상 문턱**(종부세법 §7① 개정안).
+
+  ⚠️ 2026-08-04 감사에서 발견: 개편안이 과세대상 문턱과 기본공제를 **분리**하는데
+     룰셋에는 기본공제만 있었다. 비거주 1주택 공시 12억이면 문턱(14억) 미달이라
+     과세대상이 아닌데, 엔진은 기본공제 9억을 빼고 90.8만원을 매겼다.
+
+  개조식 p.20이 둘을 별개 항목으로 적는다:
+    □ 주택분 종합부동산세 **과세대상 조정**
+      ㅇ (1세대1주택자) 공시가격 14억원 초과시 종부세 부과
+      ㅇ (그 외) 공시가격 합계액 9억원 초과시 부과(현행유지)
+    □ 주택분 종합부동산세 **기본공제금액 조정**
+      ㅇ 거주 1주택 14억 / 비거주 1주택 9억 / 그 외 4억 + 5억 × 거주비중
+
+  ★ 그래서 **비거주 1주택자의 9억~14억 구간**과 **다주택자의 기본공제~9억 구간**에서
+    문턱과 기본공제가 어긋난다. 거주 1주택자는 둘 다 14억이라 우연히 일치한다.
+
+  현행법은 기본공제가 곧 문턱이라 별도 규칙이 필요 없다 — current 트랙에는
+  블록을 두지 않고, 엔진이 규칙 없음을 '문턱 없음'으로 읽는다.
+
+  ⚠️ 문턱 기준액이 인별인지 세대인지, 지분 반영 전후인지는 원문에 없다.
+     §7①이 납세의무자 규정이므로 인별 해석을 기본으로 두되 decree_pending으로
+     낮춰 둔다. 기본공제 신공식과 같은 성격의 미정의 영역이다.
+blocks:
+  - id: threshold-reform-one-house
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {taxpayer: individual, one_house: true}
+    basis: {law: 종합부동산세법, article: "7", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 20}
+    certainty: bill_pending
+    value: 1400000000
+    note: "개조식 p.20 · 문답 p.43. 시가 약 20억 수준"
+
+  - id: threshold-reform-other
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {taxpayer: individual, one_house: false}
+    basis: {law: 종합부동산세법, article: "7", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 20}
+    certainty: bill_pending
+    value: 900000000
+    note: |
+      "(그 외) … 9억원 초과시 부과(현행유지)". 금액은 현행과 같지만,
+      개편안에서 기본공제가 4억까지 내려가므로 **문턱과 기본공제가 처음으로 갈린다.**
+
+  - id: threshold-reform-corporation
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {taxpayer: corporation}
+    basis: {law: 종합부동산세법, article: "7", clause: "1"}
+    source: {kind: pdf, file: "2. 2026년 세제개편안 상세본.pdf", page: 61}
+    certainty: bill_pending
+    value: 0
+    payload: {applicable: false}
+    note: "법인은 기본공제도 문턱도 없다(현행 유지)"
+
+---
+rule_id: jongbuse.house.basic_deduction
+unit: KRW
+description: |
+  주택분 기본공제(종부세법 §8①).
+
+  개편안의 핵심 전환이 여기 있다. 현행은 '1세대1주택이냐'만 보지만,
+  개편안은 '거기 사느냐'를 함께 본다 — 같은 사람·같은 집인데 거주 여부로 5억이 갈린다.
+
+  ★ 다주택 신공식 `4억 + 5억 × (거주주택 공시가격 ÷ 주택 공시가격 합계액)`은
+    미정의 영역이 많다. 거주주택이 2채인 세대는? 분자·분모는 지분 반영 전인가 후인가?
+    합계액은 인별인가 세대인가? 시행령 없이는 답이 없는데 이 한 줄이 공제 4억~9억을 가른다.
+    variant로 해석을 분리하고 확정도를 decree_pending으로 낮춰 둔다.
+blocks:
+  - id: bd-current-one-house
+    tracks: [current]
+    effective_from: 2023-01-01
+    selector: {taxpayer: individual, one_house: true}
+    basis: {law: 종합부동산세법, article: "8", clause: "1", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000800", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: 1200000000
+
+  - id: bd-current-other
+    tracks: [current]
+    effective_from: 2023-01-01
+    selector: {taxpayer: individual, one_house: false}
+    basis: {law: 종합부동산세법, article: "8", clause: "1", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000800", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: 900000000
+
+  - id: bd-corporation
+    tracks: [current, reform]
+    effective_from: 2021-01-01
+    selector: {taxpayer: corporation}
+    basis: {law: 종합부동산세법, article: "8", clause: "1", mst: "280417"}
+    source: {kind: pdf, file: "2. 2026년 세제개편안 상세본.pdf", page: 61}
+    certainty: enacted
+    value: 0
+    note: "법인은 기본공제가 없다(현행 유지)"
+
+  - id: bd-reform-one-house-resident
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {taxpayer: individual, one_house: true, resides: true}
+    basis: {law: 종합부동산세법, article: "8", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    value: 1400000000
+    note: "거주용 1주택 12억 → 14억 (시가 약 20억). 적용시기: 2027.1.1. 이후 납세의무 성립분"
+
+  - id: bd-reform-one-house-nonresident
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {taxpayer: individual, one_house: true, resides: false}
+    basis: {law: 종합부동산세법, article: "8", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    value: 900000000
+    note: "비거주 1주택 12억 → 9억. 거주 여부만으로 5억 차이가 난다"
+
+  - id: bd-reform-multi
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {taxpayer: individual, one_house: false}
+    basis: {law: 종합부동산세법, article: "8", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: decree_pending
+    payload:
+      formula: base_plus_residence_share
+      base: 400000000
+      residence_bonus: 500000000
+      variant: household_published_price
+      variants_considered:
+        - household_published_price: "분모 = 세대 전체 주택 공시가격 합계 (기본값)"
+        - person_published_price: "분모 = 인별 합산 공시가격"
+        - share_adjusted: "분자·분모 모두 지분 반영 후 금액"
+    note: |
+      4억 + (5억 × 거주용주택 공시가격 ÷ 주택 공시가격 합계액).
+      개조식 p.18 원문. 문답자료 p.40의 적용사례(2주택 각 10억 중 1채 거주 → 6.5억,
+      3주택 각 10억 중 1채 거주 → 약 5.7억)와 일치하는 해석을 기본값으로 둔다.
+      세부 산정방법은 시행령 위임이므로 decree_pending.
+
+---
+rule_id: jongbuse.house.fair_market_ratio
+unit: rate
+description: |
+  주택분 공정시장가액비율(종부세법 §8①, 시행령 §2의4①).
+  개편안은 법률상 범위를 60→70%로 올리고, 3주택 이상·조정대상지역 보유자
+  (1세대1주택자 제외)는 2028년부터 80%를 적용한다.
+blocks:
+  - id: fmv-current
+    tracks: [current]
+    effective_from: 2022-01-01
+    basis: {law: 종합부동산세법 시행령, article: "2-4", clause: "1", mst: "283639"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=283639&JO=000204", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: "0.60"
+
+  - id: fmv-reform-2027
+    tracks: [reform]
+    effective_from: 2027-01-01
+    effective_to: 2027-12-31
+    basis: {law: 종합부동산세법 시행령, article: "2-4", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    value: "0.70"
+
+  - id: fmv-reform-2028-general
+    tracks: [reform]
+    effective_from: 2028-01-01
+    selector: {heavy_group: false}
+    basis: {law: 종합부동산세법 시행령, article: "2-4", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    value: "0.70"
+
+  - id: fmv-reform-2028-heavy
+    tracks: [reform]
+    effective_from: 2028-01-01
+    selector: {heavy_group: true}
+    basis: {law: 종합부동산세법 시행령, article: "2-4", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    value: "0.80"
+    note: "3주택 이상 보유자 및 조정대상지역 주택 보유자(1세대1주택자는 제외)"
+
+---
+rule_id: jongbuse.house.rate_table
+unit: rate
+description: |
+  주택분 세율(종부세법 §9①②). 법문이 "기초금액 + 초과금액의 세율" 형식이므로
+  base_amount 형식을 그대로 쓴다.
+
+  개편안은 세율체계를 '주택 수 기준'에서 '주택 가액 기준'으로 단계적으로 일원화한다.
+  2028년부터는 주택 수와 무관하게 하나의 표를 쓴다.
+blocks:
+  - id: rt-current-1to2
+    tracks: [current]
+    effective_from: 2023-01-01
+    selector: {taxpayer: individual, house_group: "1-2"}
+    basis: {law: 종합부동산세법, article: "9", clause: "1", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000900", fetched_at: 2026-08-04}
+    certainty: enacted
+    table:
+      - {upto: 300000000, rate: "0.005"}
+      - {upto: 600000000, rate: "0.007", base_amount: 1500000}
+      - {upto: 1200000000, rate: "0.010", base_amount: 3600000}
+      - {upto: 2500000000, rate: "0.013", base_amount: 9600000}
+      - {upto: 5000000000, rate: "0.015", base_amount: 26500000}
+      - {upto: 9400000000, rate: "0.020", base_amount: 64000000}
+      - {upto: null, rate: "0.027", base_amount: 152000000}
+
+  - id: rt-current-3plus
+    tracks: [current]
+    effective_from: 2023-01-01
+    selector: {taxpayer: individual, house_group: "3+"}
+    basis: {law: 종합부동산세법, article: "9", clause: "1", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000900", fetched_at: 2026-08-04}
+    certainty: enacted
+    table:
+      - {upto: 300000000, rate: "0.005"}
+      - {upto: 600000000, rate: "0.007", base_amount: 1500000}
+      - {upto: 1200000000, rate: "0.010", base_amount: 3600000}
+      - {upto: 2500000000, rate: "0.020", base_amount: 9600000}
+      - {upto: 5000000000, rate: "0.030", base_amount: 35600000}
+      - {upto: 9400000000, rate: "0.040", base_amount: 110600000}
+      - {upto: null, rate: "0.050", base_amount: 286600000}
+
+  - id: rt-reform-2027-1to2
+    tracks: [reform]
+    effective_from: 2027-01-01
+    effective_to: 2027-12-31
+    selector: {taxpayer: individual, house_group: "1-2"}
+    basis: {law: 종합부동산세법, article: "9", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    table:
+      - {upto: 300000000, rate: "0.005"}
+      - {upto: 600000000, rate: "0.007", base_amount: 1500000}
+      - {upto: 1200000000, rate: "0.013", base_amount: 3600000}
+      - {upto: 2500000000, rate: "0.015", base_amount: 11400000}
+      - {upto: 5000000000, rate: "0.020", base_amount: 30900000}
+      - {upto: 9400000000, rate: "0.027", base_amount: 80900000}
+      - {upto: null, rate: "0.035", base_amount: 199700000}
+
+  - id: rt-reform-2027-3plus
+    tracks: [reform]
+    effective_from: 2027-01-01
+    effective_to: 2027-12-31
+    selector: {taxpayer: individual, house_group: "3+"}
+    basis: {law: 종합부동산세법, article: "9", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    table:
+      - {upto: 300000000, rate: "0.005"}
+      - {upto: 600000000, rate: "0.007", base_amount: 1500000}
+      - {upto: 1200000000, rate: "0.013", base_amount: 3600000}
+      - {upto: 2500000000, rate: "0.020", base_amount: 11400000}
+      - {upto: 5000000000, rate: "0.030", base_amount: 37400000}
+      - {upto: 9400000000, rate: "0.040", base_amount: 112400000}
+      - {upto: null, rate: "0.050", base_amount: 288400000}
+
+  # 법인은 누진세율이 아니라 단일세율이다(§9②). 구간이 하나뿐인 표로 표현한다.
+  - id: rt-current-corp-1to2
+    tracks: [current]
+    effective_from: 2023-01-01
+    selector: {taxpayer: corporation, house_group: "1-2"}
+    basis: {law: 종합부동산세법, article: "9", clause: "2", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000900", fetched_at: 2026-08-04}
+    certainty: enacted
+    table:
+      - {upto: null, rate: "0.027"}
+
+  - id: rt-current-corp-3plus
+    tracks: [current]
+    effective_from: 2023-01-01
+    selector: {taxpayer: corporation, house_group: "3+"}
+    basis: {law: 종합부동산세법, article: "9", clause: "2", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000900", fetched_at: 2026-08-04}
+    certainty: enacted
+    table:
+      - {upto: null, rate: "0.050"}
+
+  - id: rt-reform-2027-corp-1to2
+    tracks: [reform]
+    effective_from: 2027-01-01
+    effective_to: 2027-12-31
+    selector: {taxpayer: corporation, house_group: "1-2"}
+    basis: {law: 종합부동산세법, article: "9", clause: "2"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    table:
+      - {upto: null, rate: "0.035"}
+
+  - id: rt-reform-2027-corp-3plus
+    tracks: [reform]
+    effective_from: 2027-01-01
+    effective_to: 2027-12-31
+    selector: {taxpayer: corporation, house_group: "3+"}
+    basis: {law: 종합부동산세법, article: "9", clause: "2"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    table:
+      - {upto: null, rate: "0.050"}
+
+  - id: rt-reform-2028-corp
+    tracks: [reform]
+    effective_from: 2028-01-01
+    selector: {taxpayer: corporation}
+    basis: {law: 종합부동산세법, article: "9", clause: "2"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    note: "2028년부터 법인은 주택 수와 무관하게 5.0% 단일세율"
+    table:
+      - {upto: null, rate: "0.050"}
+
+  - id: rt-reform-2028-all
+    tracks: [reform]
+    effective_from: 2028-01-01
+    selector: {taxpayer: individual}
+    basis: {law: 종합부동산세법, article: "9", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    note: "2028년부터 주택 수와 무관하게 가액 기준 단일 세율표"
+    table:
+      - {upto: 300000000, rate: "0.005"}
+      - {upto: 600000000, rate: "0.007", base_amount: 1500000}
+      - {upto: 1200000000, rate: "0.013", base_amount: 3600000}
+      - {upto: 2500000000, rate: "0.020", base_amount: 11400000}
+      - {upto: 5000000000, rate: "0.030", base_amount: 37400000}
+      - {upto: 9400000000, rate: "0.040", base_amount: 112400000}
+      - {upto: null, rate: "0.050", base_amount: 288400000}
+
+---
+rule_id: jongbuse.house.property_tax_credit_method
+unit: rate
+description: |
+  주택분 종부세에서 공제되는 재산세액(종부세법 §9③, 시행령 §4의3①).
+
+  ★ 이 산식의 해석이 종부세 재현의 관건이었다.
+
+    공제할 재산세액 = 부과된 재산세 세액 합계 × ─────────────────────────────
+                    (종부세 과세표준 × 재산세 공정시장가액비율) × 재산세 표준세율
+                    ─────────────────────────────────────────────
+                    주택을 합산하여 재산세 표준세율로 계산한 재산세 상당액
+
+  분자의 "재산세 표준세율"을 **누진 전체가 아니라 해당 구간의 한계세율**로 적용해야
+  정부 문답자료 p.44의 세 값(세액공제 516.5 / 종부세 154.9 / 468.9만원)이 동시에
+  원 단위까지 재현된다. 누진 전체로 적용하면 어느 값도 맞지 않는다.
+  정부가 공개하지 않은 부분이라 근거는 재현 결과이며, 확정도를 assumed로 둔다.
+blocks:
+  - id: ptc-marginal-rate
+    tracks: [current, reform]
+    effective_from: 2009-01-01
+    basis: {law: 종합부동산세법 시행령, article: "4-3", clause: "1", mst: "283639"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=283639&JO=000403", fetched_at: 2026-08-04}
+    certainty: assumed
+    payload:
+      numerator_rate: marginal
+      note: "문답자료 p.44 3개 값 동시 재현으로 확인. tests/golden/jongbuse_2026.yaml 참조"
+
+---
+rule_id: jongbuse.house.credit_age
+unit: rate
+description: 1세대1주택자 연령별 세액공제(종부세법 §9⑥). 개편안에서도 현행 유지.
+blocks:
+  - id: age-current
+    tracks: [current, reform]
+    effective_from: 2021-01-01
+    basis: {law: 종합부동산세법, article: "9", clause: "6", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000900", fetched_at: 2026-08-04}
+    certainty: enacted
+    payload:
+      tiers:
+        - {min_age: 60, rate: "0.20"}
+        - {min_age: 65, rate: "0.30"}
+        - {min_age: 70, rate: "0.40"}
+
+---
+rule_id: jongbuse.house.credit_holding
+unit: rate
+description: |
+  1세대1주택자 보유기간별 세액공제(종부세법 §9⑦).
+
+  개편안은 이걸 거주기간 공제로 전환한다. 2027년은 과도기로 '보유공제의 1/2'과
+  '거주공제' 중 높은 쪽을 쓰고, 2028년부터는 거주공제만 남는다.
+blocks:
+  - id: holding-current
+    tracks: [current]
+    effective_from: 2021-01-01
+    basis: {law: 종합부동산세법, article: "9", clause: "7", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000900", fetched_at: 2026-08-04}
+    certainty: enacted
+    payload:
+      tiers:
+        - {min_years: 5, rate: "0.20"}
+        - {min_years: 10, rate: "0.40"}
+        - {min_years: 15, rate: "0.50"}
+
+  - id: holding-reform-2027
+    tracks: [reform]
+    effective_from: 2027-01-01
+    effective_to: 2027-12-31
+    basis: {law: 종합부동산세법, article: "9", clause: "7"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 19}
+    certainty: bill_pending
+    payload:
+      mode: max_of_halved_holding_or_residence
+      holding_tiers:
+        - {min_years: 5, rate: "0.10"}
+        - {min_years: 10, rate: "0.20"}
+        - {min_years: 15, rate: "0.25"}
+      residence_tiers:
+        - {min_years: 5, rate: "0.20"}
+        - {min_years: 10, rate: "0.40"}
+        - {min_years: 15, rate: "0.50"}
+
+  - id: holding-reform-2028
+    tracks: [reform]
+    effective_from: 2028-01-01
+    basis: {law: 종합부동산세법, article: "9", clause: "7"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 19}
+    certainty: bill_pending
+    payload:
+      mode: residence_only
+      residence_tiers:
+        - {min_years: 5, rate: "0.20"}
+        - {min_years: 10, rate: "0.40"}
+        - {min_years: 15, rate: "0.50"}
+
+---
+rule_id: jongbuse.house.credit_rate_cap
+unit: rate
+description: 연령공제 + 보유(거주)공제 합계 공제율 한도(종부세법 §9⑧). 현행·개편안 모두 80%.
+blocks:
+  - id: cap-80
+    tracks: [current, reform]
+    effective_from: 2009-01-01
+    basis: {law: 종합부동산세법, article: "9", clause: "8", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000900", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: "0.80"
+
+---
+rule_id: jongbuse.house.credit_amount_cap
+unit: KRW
+description: |
+  세액공제 금액 한도 — 개편안 신설(개조식 p.19).
+  현행은 한도가 없다. '한도 없음'을 데이터로 명시해 두어야, 한도를 적용하지 않은 것이
+  규칙이 없어서인지 법이 그런지 감사 추적에서 구분된다.
+blocks:
+  - id: amount-cap-none
+    tracks: [current]
+    effective_from: 2009-01-01
+    basis: {law: 종합부동산세법, article: "9", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000900", fetched_at: 2026-08-04}
+    certainty: enacted
+    payload: {applicable: false}
+
+  - id: amount-cap-2027
+    tracks: [reform]
+    effective_from: 2027-01-01
+    effective_to: 2027-12-31
+    basis: {law: 종합부동산세법, article: "9"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 19}
+    certainty: bill_pending
+    value: 8000000
+
+  - id: amount-cap-2028
+    tracks: [reform]
+    effective_from: 2028-01-01
+    basis: {law: 종합부동산세법, article: "9"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 19}
+    certainty: bill_pending
+    value: 6000000
+
+---
+rule_id: jongbuse.house.burden_cap
+unit: rate
+description: |
+  세부담 상한(종부세법 §10). 해당연도 보유세(재산세+종부세)가 직전연도의 일정 배수를
+  넘지 않도록 종부세를 제한한다. 개편안은 150% → 200%로 완화(=상한이 느슨해져 세액 증가).
+  단일세율이 적용되는 법인은 적용 대상이 아니다.
+blocks:
+  - id: burden-current-150
+    tracks: [current]
+    effective_from: 2023-01-01
+    selector: {taxpayer: individual}
+    basis: {law: 종합부동산세법, article: "10", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=001000", fetched_at: 2026-08-04}
+    certainty: enacted
+    value: "1.50"
+
+  - id: burden-reform-200
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {taxpayer: individual}
+    basis: {law: 종합부동산세법, article: "10"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 19}
+    certainty: bill_pending
+    value: "2.00"
+
+  - id: burden-corporation-none
+    tracks: [current, reform]
+    effective_from: 2021-01-01
+    selector: {taxpayer: corporation}
+    basis: {law: 종합부동산세법, article: "10", mst: "280417"}
+    source: {kind: pdf, file: "3. 2026년 세제개편안 문답자료.pdf", page: 42}
+    certainty: enacted
+    payload: {applicable: false}
+    note: "단일세율이 적용되는 법인 또는 법인으로 보는 단체는 세부담 상한 미적용"
+
+---
+rule_id: jongbuse.surtax_rate
+unit: rate
+description: 농어촌특별세(농어촌특별세법 §5①). 종합부동산세액의 20%.
+blocks:
+  - id: surtax-20
+    tracks: [current, reform]
+    effective_from: 2005-01-01
+    basis: {law: 농어촌특별세법, article: "5", clause: "1"}
+    source: {kind: manual, note: "농어촌특별세법 §5①6 — 종합부동산세액의 100분의 20"}
+    certainty: enacted
+    value: "0.20"

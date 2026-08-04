@@ -1,0 +1,55 @@
+rule_id: test.basic_deduction
+unit: KRW
+description: |
+  종부세 주택분 기본공제. 현행/개편안 두 트랙과 거주 여부 분기를 실제 구조 그대로 담는다.
+  개편안 값은 개조식 p.18 원문 기준.
+blocks:
+  # ---- 현행법 ----------------------------------------------------------
+  - id: bd-current-1house
+    tracks: [current]
+    effective_from: 2021-01-01
+    selector: {taxpayer: individual, one_house: true}
+    basis: {law: 종합부동산세법, article: "8", clause: "1", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=law&MST=280417"}
+    certainty: enacted
+    value: 1200000000
+
+  - id: bd-current-other
+    tracks: [current]
+    effective_from: 2021-01-01
+    selector: {taxpayer: individual, one_house: false}
+    basis: {law: 종합부동산세법, article: "8", clause: "1", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=law&MST=280417"}
+    certainty: enacted
+    value: 900000000
+
+  # ---- 개편안: 1주택자를 거주/비거주로 쪼갠다 ---------------------------
+  - id: bd-reform-1house-resident
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {taxpayer: individual, one_house: true, resides: true}
+    basis: {law: 종합부동산세법, article: "8", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    value: 1400000000
+    note: 거주용 1주택 12억 → 14억
+
+  - id: bd-reform-1house-nonresident
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {taxpayer: individual, one_house: true, resides: false}
+    basis: {law: 종합부동산세법, article: "8", clause: "1"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 18}
+    certainty: bill_pending
+    value: 900000000
+    note: 비거주 1주택 12억 → 9억
+
+  # ---- 법인은 기본공제가 없다 ------------------------------------------
+  - id: bd-corporation
+    tracks: [current, reform]
+    effective_from: 2021-01-01
+    selector: {taxpayer: corporation}
+    basis: {law: 종합부동산세법, article: "8", clause: "1"}
+    source: {kind: pdf, file: "2. 2026년 세제개편안 상세본.pdf", page: 61}
+    certainty: enacted
+    value: 0

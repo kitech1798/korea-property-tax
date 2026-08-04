@@ -1,0 +1,8 @@
+# 런타임 (배포에 필요한 것만)
+streamlit>=1.40
+pyyaml>=6.0
+
+# 개발·데이터 확보 도구 (배포에는 불필요)
+#   pymupdf>=1.24   tools/extract_reform.py — 세제개편안 PDF 텍스트화
+#   pytest>=8.0     테스트
+#   hypothesis>=6.0 속성 기반 테스트 (선택)

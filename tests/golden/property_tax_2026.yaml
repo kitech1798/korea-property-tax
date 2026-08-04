@@ -1,0 +1,118 @@
+# 재산세 골든 케이스 — 재정경제부 2026 세제개편안 문답자료에서 역산.
+#
+# 문답자료는 재산세를 단독으로 표기하지 않는다. 대신 "보유세(재산세+종부세)"와
+# "종부세 합계"를 둘 다 싣는다. 그 차이가 곧 정부가 계산한 재산세다.
+#
+#   재산세 = 보유세 − 종부세
+#
+# 역산값이므로 `derivation`에 산식을 남긴다. 정부가 직접 인쇄한 숫자가 아니라
+# 우리가 뺀 값이라는 사실을 숨기면, 나중에 이 테스트가 무엇을 증명하는지 알 수 없게 된다.
+#
+# 확인된 계산 전제 (5개 케이스가 원 단위까지 일치해 확정)
+#   · 1세대1주택 공정시장가액비율 45% (시가표준액 9억 초과 1주택 포함)
+#   · 표준세율 적용 — 공시 9억 초과라 1세대1주택 세율 특례(§111의2)는 배제
+#   · 도시지역분 0.14% 부과
+#   · 지방교육세 = 재산세 본세 × 20% (도시지역분 제외)
+#   · 과세표준상한 미적용 (공시가격 변동 없음 가정)
+
+meta:
+  source_document: "3. 2026년 세제개편안 문답자료.pdf"
+  extracted_to: corpus/reform_2026/문답자료.json
+  unit: 만원
+  note: |
+    문답자료 p.44 사례와 p.46~47 별첨은 모두 "공시가격 변동 없음"을 전제로 하고,
+    2027~2028년 재산세를 2026년과 동일한 값으로 표시한다. 즉 1주택 공정시장가액비율
+    43~45% 특례(2026년 한정)가 계속 연장된다고 가정한 것이다.
+
+cases:
+  - id: pt-1house-1500
+    label: 1세대1주택 · 공시 15억
+    source: {doc: 문답자료, page: 46, row: "별첨 ➀➊ 시가20억원 수준(공시가 15억) 현행"}
+    derivation: "보유세 370.5 − 종부세 27.6 = 342.9"
+    year: 2026
+    published_price: 1_500_000_000
+    one_house: true
+    in_urban_planning_area: true
+    expected_manwon: 342.9
+    cross_check:
+      - {page: 46, row: "별첨 ➀➋ 동일 공시가, 50세 2년 거주", derivation: "412.0 − 69.1 = 342.9"}
+      - {page: 47, row: "별첨 ➁ 비거주 1주택", derivation: "370.5 − 27.6 = 342.9"}
+
+  - id: pt-1house-2000
+    label: 1세대1주택 · 공시 20억
+    source: {doc: 문답자료, page: 46, row: "별첨 ➀➊ 시가30억원 수준(공시가 20억) 현행"}
+    derivation: "보유세 573.4 − 종부세 91.0 = 482.4"
+    year: 2026
+    published_price: 2_000_000_000
+    one_house: true
+    in_urban_planning_area: true
+    expected_manwon: 482.4
+    cross_check:
+      - {page: 46, row: "별첨 ➀➋ 50세 2년 거주", derivation: "709.9 − 227.5 = 482.4"}
+
+  - id: pt-1house-3000
+    label: 1세대1주택 · 공시 30억
+    source: {doc: 문답자료, page: 44, row: "사례① 시가45억원 수준(공시가30억) 26년"}
+    derivation: "보유세 916.3 − 종부세 154.9 = 761.4"
+    year: 2026
+    published_price: 3_000_000_000
+    one_house: true
+    in_urban_planning_area: true
+    expected_manwon: 761.4
+    cross_check:
+      - {page: 44, row: "사례② 동일 공시가 10년 보유", derivation: "916.3 − 154.9 = 761.4"}
+      - {page: 44, row: "사례① 27년", derivation: "961.7 − 200.3 = 761.4"}
+      - {page: 44, row: "사례① 28년", derivation: "1,042.7 − 281.3 = 761.4"}
+
+  - id: pt-1house-3500
+    label: 1세대1주택 · 공시 35억
+    source: {doc: 문답자료, page: 46, row: "별첨 ➀➊ 시가50억원 수준(공시가 35억) 현행"}
+    derivation: "보유세 1,354.8 − 종부세 453.9 = 900.9"
+    year: 2026
+    published_price: 3_500_000_000
+    one_house: true
+    in_urban_planning_area: true
+    expected_manwon: 900.9
+    cross_check:
+      - {page: 46, row: "별첨 ➀➋ 50세 2년 거주", derivation: "2,035.6 − 1,134.7 = 900.9"}
+
+  - id: pt-1house-5000
+    label: 1세대1주택 · 공시 50억
+    source: {doc: 문답자료, page: 44, row: "사례③ 시가70억원 수준(공시가50억) 26년"}
+    derivation: "보유세 1,788.3 − 종부세 468.9 = 1,319.4"
+    year: 2026
+    published_price: 5_000_000_000
+    one_house: true
+    in_urban_planning_area: true
+    expected_manwon: 1319.4
+    cross_check:
+      - {page: 46, row: "별첨 ➀➊ 시가70억원 수준", derivation: "2,257.1 − 937.7 = 1,319.4"}
+
+# ---------------------------------------------------------------------------
+# 재현되지 않는 케이스 — 숨기지 않고 남긴다.
+# ---------------------------------------------------------------------------
+unreconciled:
+  - id: pt-3house-aggregate
+    label: 3주택 · 공시 합계 15억 (동일가액 3채)
+    source: {doc: 문답자료, page: 47, row: "별첨 ➂ 시가20억원 수준(공시가 15억) 현행"}
+    derivation: "보유세 609.2 − 종부세 126.7 = 482.5"
+    status: reproduced_with_inferred_assumption
+    inferred_assumption: property_tax_aggregate
+    finding: |
+      정부 예시는 3주택의 재산세를 물건별이 아니라 **합산 공시가격 한 덩어리**로
+      계산했다. 공시 15억을 하나의 물건으로 보면 482.4만원이 나오고(정부 표기 482.5,
+      1천원 차이는 반올림), 4개 가액 구간 전부가 이 방식으로 정확히 재현된다.
+
+        공시 15억 → 482.4 (정부 482.5)
+        공시 20억 → 668.4 (정부 668.4)
+        공시 35억 → 1,226.4 (정부 1,226.4)
+        공시 50억 → 1,784.4 (정부 1,784.4)
+
+      그러나 재산세는 지방세법상 **물건별 과세**이고 누진세율도 물건별로 적용된다.
+      15억을 3채(각 5억)로 나누면 실제 재산세는 331.2만원이다. 정부 예시는 재산세를
+      약 46% 과대계상한 셈이다 — 예시의 초점이 종부세 변화라 재산세를 단순화한 것으로 보인다.
+
+      엔진의 기본값은 **법대로 물건별**로 간다. 정부 예시를 재현하려면 합산 방식을
+      명시적으로 선택해야 한다.
+    engine_per_property_manwon: 331.2
+    government_aggregate_manwon: 482.4
