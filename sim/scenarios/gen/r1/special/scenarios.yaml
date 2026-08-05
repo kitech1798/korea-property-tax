@@ -1,0 +1,651 @@
+# 앵글: 특례주택 복합 (상속 · 일시적2주택 · 지방저가 · 등록임대)
+# 노리는 것: 합산배제와 주택수 제외 판정의 경계 ±1원 / ±1일, 그리고 특례가 겹칠 때의 상호작용.
+# 판정 결과(주택수·1세대1주택·조정지역)는 쓰지 않는다. 사실만 쓴다.
+
+id: special-01
+label: 상속주택 지분 정확히 40% · 공시 6억 정확 · 상속 후 만 5년 되는 해
+origin: special
+intent: |
+  상속주택 주택수 제외 3요건(지분 40% 이하 · 공시 6억 이하 · 5년 이내)을
+  셋 다 "정확히 경계값"으로 동시에 맞춘다. 이하/미만을 혼동하면 여기서 갈린다.
+  40%를 2/5 분수로 주어 부동소수 반올림으로 40.000001%가 되지 않는지도 본다.
+expectation: |
+  세 요건 모두 "이하/이내"이므로 경계값은 충족 쪽이어야 한다. 상속주택이 주택수에서
+  빠지면 본래 주택 1채만 남는 구성이 되고, 빠지지 않으면 다주택 구성이 된다.
+  두 트랙 모두 같은 판정이어야 하며, 판정 근거에 경계 충족이 드러나야 한다.
+tags: [상속, 경계, 지분40, 공시6억, 5년]
+year: 2026
+tracks: [current, reform]
+subject: p1
+persons:
+  - {id: p1, name: 상속인갑, birth: 1972-04-11, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: main_seoul
+    name: 본래 주택 (서울 역삼)
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 1_800_000_000}
+  - id: inh_busan
+    name: 상속 지분 주택 (부산 해운대)
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    prices: {2026: 600_000_000}
+ownerships:
+  - {person: p1, property: main_seoul, share: 1, acquired: 2014-09-30, cause: purchase}
+  - person: p1
+    property: inh_busan
+    share: "2/5"
+    acquired: 2021-06-01
+    cause: inheritance
+    inherited:
+      date: 2021-06-01
+      share: "2/5"
+      value: 240_000_000
+residences:
+  - {person: p1, property: main_seoul, start: 2014-09-30}
+
+---
+
+id: special-02
+label: 상속주택 지분 40.1% — 경계를 1/1000 넘긴 경우
+origin: special
+intent: |
+  special-01과 단 하나, 지분만 2/5 → 401/1000으로 바꾼다. 나머지 사실은 동일.
+  40% 초과 판정이 실제로 작동하는지, 아니면 반올림해서 40%로 봐 주는지 본다.
+  분수 문자열이 정확히 유리수로 비교되는지도 함께 검증된다.
+expectation: |
+  special-01과 결과가 달라져야 한다. 지분 요건을 넘겼으므로 상속주택이 주택수에
+  포함되는 쪽으로 갈리고, 그만큼 세부담이 special-01보다 무거워야 한다.
+  두 시나리오가 동일한 결과를 낸다면 지분 경계 비교가 죽어 있는 것이다.
+tags: [상속, 경계, 지분초과, 대조군]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 상속인을, birth: 1972-04-11, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: main_seoul
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 1_800_000_000}
+  - id: inh_busan
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    prices: {2026: 600_000_000}
+ownerships:
+  - {person: p1, property: main_seoul, share: 1, acquired: 2014-09-30, cause: purchase}
+  - person: p1
+    property: inh_busan
+    share: "401/1000"
+    acquired: 2021-06-01
+    cause: inheritance
+    inherited:
+      date: 2021-06-01
+      share: "401/1000"
+      value: 240_600_000
+residences:
+  - {person: p1, property: main_seoul, start: 2014-09-30}
+
+---
+
+id: special-03
+label: 상속주택 공시가격 6억 + 1원 · 지분은 넉넉히 통과
+origin: special
+intent: |
+  가액 요건만 딱 1원 넘긴다. 지분(1/5)과 상속경과(2년)는 여유롭게 통과시켜
+  탈락 원인이 오직 "6억 초과 1원"임을 고립시킨다.
+  가액 판정 기준이 주택 전체 공시가격인지 내 지분 상당액인지도 갈린다 —
+  지분 1/5이므로 지분 상당액은 1.2억, 전체는 6억+1원이다. 기준이 다르면 결과가 뒤집힌다.
+expectation: |
+  6억 "이하"가 요건이므로 1원 초과는 탈락이어야 한다. 다만 판정 기준액이
+  전체 공시가격인지 지분 상당액인지에 따라 결론이 정반대가 되므로,
+  산출물이 어느 금액을 근거로 삼았는지 명시되어야 한다.
+tags: [상속, 경계, 공시6억, 1원, 지분상당액]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 상속인병, birth: 1968-12-25, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: main_bundang
+    name: 본래 주택 (분당)
+    kind: apartment
+    dong: "4113510100"
+    urban: true
+    prices: {2026: 1_100_000_000}
+  - id: inh_daegu
+    name: 상속 지분 주택 (대구 중구)
+    kind: apartment
+    dong: "2711010100"
+    urban: true
+    prices: {2026: 600_000_001}
+ownerships:
+  - {person: p1, property: main_bundang, share: 1, acquired: 2017-02-14, cause: purchase}
+  - person: p1
+    property: inh_daegu
+    share: "1/5"
+    acquired: 2024-03-20
+    cause: inheritance
+    inherited:
+      date: 2024-03-20
+      share: "1/5"
+      value: 120_000_000
+residences:
+  - {person: p1, property: main_bundang, start: 2017-02-14}
+
+---
+
+id: special-04
+label: 상속 5년 경과 · 상속 지분과 현재 지분이 어긋남 (상속 후 추가 매수)
+origin: special
+intent: |
+  ① 상속개시일 2021-05-31 → 2026-06-01 기준일에는 5년 하루 초과.
+  ② inherited.share는 1/4인데 현재 ownerships.share는 1/2 — 상속 후 다른 상속인
+     지분을 사들인 상황. 엔진이 어느 지분으로 40% 요건을 보는지 갈린다.
+  ③ 취득일(2019-08-01)이 상속개시일(2021-05-31)보다 앞선다 — 원래 공유자였다가
+     추가로 상속받은 모순처럼 보이는 사실. 날짜 정합성 검사가 있으면 여기서 터진다.
+  years를 4년 주어 5년 경과 시점이 타임라인 중간에 걸리게 한다.
+expectation: |
+  2026년에는 이미 5년 요건을 벗어났으므로 상속 특례가 적용되지 않아야 한다.
+  더 중요한 것은 지분 기준이다 — 상속 당시 1/4로 보면 40% 이하지만 현재 1/2로 보면
+  초과다. 판정 근거에 어느 지분을 썼는지 드러나야 하고, 취득일이 상속일보다 이른
+  모순은 오류로 잡히거나 최소한 경고로 드러나야 한다.
+tags: [상속, 5년경과, 모순, 지분불일치, 타임라인]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+tracks: [current, reform]
+growth: 0.0
+subject: p1
+prior_year_total_tax: 2_400_000
+persons:
+  - {id: p1, name: 공유상속인, birth: 1965-05-31, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: main_songpa
+    name: 본래 주택 (송파 잠실)
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2026: 2_100_000_000}
+  - id: inh_hanam
+    name: 상속 + 매수 혼합 지분 주택 (하남)
+    kind: apartment
+    dong: "4145010100"
+    urban: true
+    prices: {2026: 900_000_000}
+ownerships:
+  - {person: p1, property: main_songpa, share: 1, acquired: 2013-11-05, cause: purchase}
+  - person: p1
+    property: inh_hanam
+    share: "1/2"
+    acquired: 2019-08-01
+    cause: inheritance
+    inherited:
+      date: 2021-05-31
+      share: "1/4"
+      value: 180_000_000
+residences:
+  - {person: p1, property: main_songpa, start: 2013-11-05}
+
+---
+
+id: special-05
+label: 일시적 2주택 처분기한 하루 초과 — 기한 다음 날 양도
+origin: special
+intent: |
+  종전주택(서울)을 두고 2023-06-02 신규주택(하남)을 취득했다.
+  종부세 기준일 2026-06-01 시점에 두 채를 모두 보유 중이고,
+  양도는 기한을 하루 넘긴 2026-06-02에 이뤄진다.
+  일시적 2주택 특례의 기산점이 신규 취득일인지 기준일인지, 처분기한 계산에서
+  '3년이 되는 날'을 포함하는지 배제하는지가 하루 차이로 갈린다.
+  양도세 트랙도 함께 물어 종부세 판정과 양도세 판정이 서로 다른 기준을 쓰는지 본다.
+expectation: |
+  기준일에는 두 채를 모두 보유하므로 종부세는 2주택 상태로 계산되되,
+  일시적 2주택 특례를 인정하면 1주택 취급이 될 수도 있다. 양도가 기한을 하루
+  넘겼으므로 특례 유지 여부가 부정되는 방향이 자연스럽다.
+  종부세 판정과 양도세 비과세 판정이 서로 모순된 전제를 쓰지 않아야 한다.
+tags: [일시적2주택, 처분기한, 하루차이, 양도]
+year: 2026
+years: [2026, 2027]
+subject: p1
+persons:
+  - {id: p1, name: 갈아타기, birth: 1980-01-15, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: old_seoul
+    name: 종전주택 (서울 강서 화곡)
+    kind: apartment
+    dong: "1150010100"
+    urban: true
+    prices: {2026: 1_050_000_000, 2027: 1_050_000_000}
+  - id: new_hanam
+    name: 신규주택 (하남)
+    kind: apartment
+    dong: "4145010100"
+    urban: true
+    prices: {2026: 1_300_000_000, 2027: 1_300_000_000}
+ownerships:
+  - {person: p1, property: old_seoul, share: 1, acquired: 2016-06-02, cause: purchase}
+  - {person: p1, property: new_hanam, share: 1, acquired: 2023-06-02, cause: purchase}
+residences:
+  - {person: p1, property: old_seoul, start: 2016-06-02, end: 2023-06-01}
+  - {person: p1, property: new_hanam, start: 2023-06-02}
+transfer:
+  property: old_seoul
+  person: p1
+  date: 2026-06-02
+  price: 1_500_000_000
+  acquisition_price: 620_000_000
+  acquisition_date: 2016-06-02
+  necessary_expense: 25_000_000
+  share: 1
+
+---
+
+id: special-06
+label: 지방 저가주택 3억 정확 1채 + 3억 1원 1채 — 둘 다 수도권 밖
+origin: special
+intent: |
+  지방 저가주택 요건은 "수도권 밖 + 공시 3억 이하"다. 3억 정확(목포)과
+  3억+1원(서귀포)을 나란히 두어 이하 판정의 경계를 직접 대조한다.
+  동시에 특례 적용 개수 제한도 건드린다 — 지방 저가주택은 통상 1채만 특례인데
+  둘 다 요건을 아슬아슬하게 놓고 어느 쪽을 고르는지, 아니면 둘 다 빼는지 본다.
+  서울 본래 주택 1채가 함께 있어 특례가 벗겨지면 3주택 구성이 된다.
+expectation: |
+  3억 정확은 요건 충족, 3억+1원은 미충족이어야 한다. 결과적으로 특례로 빠지는 것은
+  한 채뿐이어야 하며, 산출물에 어느 주택이 왜 제외/미제외인지 각각 드러나야 한다.
+  두 채를 모두 빼거나 모두 넣는다면 경계 비교나 개수 제한 중 하나가 죽은 것이다.
+tags: [지방저가, 경계, 3억, 1원, 개수제한]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 지방보유자, birth: 1974-07-07, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: main_yongsan
+    name: 본래 주택 (용산 한남)
+    kind: apartment
+    dong: "1117010100"
+    urban: true
+    prices: {2026: 2_600_000_000}
+  - id: local_mokpo
+    name: 지방 저가 후보 A (목포)
+    kind: detached
+    dong: "4611010100"
+    urban: false
+    prices: {2026: 300_000_000}
+  - id: local_jeju
+    name: 지방 저가 후보 B (서귀포)
+    kind: detached
+    dong: "5013010100"
+    urban: false
+    prices: {2026: 300_000_001}
+ownerships:
+  - {person: p1, property: main_yongsan, share: 1, acquired: 2012-03-15, cause: purchase}
+  - {person: p1, property: local_mokpo, share: 1, acquired: 2020-10-01, cause: purchase}
+  - {person: p1, property: local_jeju, share: 1, acquired: 2021-04-19, cause: inheritance, inherited: {date: 2021-04-19, share: 1, value: 280_000_000}}
+residences:
+  - {person: p1, property: main_yongsan, start: 2012-03-15}
+
+---
+
+id: special-07
+label: 등록임대 임대료 5% 상한 위반 + 의무기간 이미 종료 · 합산배제 신청은 살아 있음
+origin: special
+intent: |
+  합산배제 요건이 사후에 깨지는 경로를 두 개 동시에 건다.
+  ① rent_increase_within_cap: false (임대료 증액 상한 위반)
+  ② obligation_end 2025-12-31 — 2026 기준일에는 이미 의무기간 종료
+  그런데 elections에는 rental_exclusion 신청이 그대로 남아 있다.
+  신청이 있으면 요건 위반을 무시하고 빼 주는지, 요건을 먼저 보는지가 갈린다.
+expectation: |
+  요건 위반이 신청보다 우선해야 한다 — 상한 위반과 의무기간 종료 어느 쪽이든
+  합산배제가 부정되는 방향이 옳다. 신청 존재만으로 배제가 유지된다면
+  검증 순서가 뒤집힌 것이다. 두 위반 사유가 각각 근거에 드러나야 한다.
+tags: [임대, 5%위반, 의무기간종료, 신청우선순위]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 임대사업자, birth: 1969-09-09, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: main_gangnam
+    name: 본래 주택 (강남 역삼)
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 1_700_000_000}
+  - id: rent_haeundae
+    name: 등록임대 (부산 해운대)
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    prices: {2026: 800_000_000}
+    rental:
+      type: purchased_long_term
+      registered_on: 2017-12-31
+      obligation_end: 2025-12-31
+      rent_increase_within_cap: false
+ownerships:
+  - {person: p1, property: main_gangnam, share: 1, acquired: 2011-05-20, cause: purchase}
+  - {person: p1, property: rent_haeundae, share: 1, acquired: 2017-12-20, cause: purchase}
+residences:
+  - {person: p1, property: main_gangnam, start: 2011-05-20}
+elections:
+  - {person: p1, kind: rental_exclusion, year: 2026}
+
+---
+
+id: special-08
+label: 등록임대 5개 유형 전수 보유 — 본래 주택 없이 임대주택만
+origin: special
+intent: |
+  built_public_support / built_long_term / purchased_public_support /
+  purchased_long_term / short_term 다섯 유형을 각 1채씩, 유형별 분기를 한 번에 훑는다.
+  short_term은 통상 합산배제 대상에서 빠지는 유형이라 다섯 중 하나만 결과가 달라야 한다.
+  본래 거주 주택이 없어 "특례를 빼면 0채"가 되는 구성도 겸한다.
+  임대의무기간은 2026-06-01 기준으로 하나는 종료 전날, 하나는 종료 당일에 걸린다.
+expectation: |
+  유형별로 판정이 달라야 한다 — 다섯 채가 전부 같은 취급을 받는다면 type 분기가
+  읽히지 않는 것이다. short_term 한 채만 남는 결과가 자연스럽다.
+  전부 배제되어 과세 대상이 0채가 되는 경우 세액이 0이 되는지, 아니면
+  최소 1채를 되돌려 계산하는지가 드러나야 한다.
+tags: [임대, 5종, 유형분기, short_term, 0채]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 전업임대인, birth: 1963-02-28, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: r_bps
+    name: 건설 공공지원 임대
+    kind: apartment
+    dong: "4413010100"
+    urban: true
+    prices: {2026: 400_000_000}
+    rental: {type: built_public_support, registered_on: 2019-01-10, obligation_end: 2029-01-10, rent_increase_within_cap: true}
+  - id: r_blt
+    name: 건설 장기일반 임대
+    kind: apartment
+    dong: "4413010100"
+    urban: true
+    prices: {2026: 450_000_000}
+    rental: {type: built_long_term, registered_on: 2018-06-01, obligation_end: 2026-05-31, rent_increase_within_cap: true}
+  - id: r_pps
+    name: 매입 공공지원 임대
+    kind: apartment
+    dong: "2711010100"
+    urban: true
+    prices: {2026: 500_000_000}
+    rental: {type: purchased_public_support, registered_on: 2018-06-01, obligation_end: 2026-06-01, rent_increase_within_cap: true}
+  - id: r_plt
+    name: 매입 장기일반 임대
+    kind: officetel_residential
+    dong: "2647010100"
+    urban: true
+    prices: {2026: 550_000_000}
+    rental: {type: purchased_long_term, registered_on: 2020-03-03, obligation_end: 2030-03-03, rent_increase_within_cap: true}
+  - id: r_st
+    name: 단기 임대
+    kind: multi_unit
+    dong: "4611010100"
+    urban: false
+    prices: {2026: 250_000_000}
+    rental: {type: short_term, registered_on: 2019-09-09, obligation_end: 2028-09-09, rent_increase_within_cap: true}
+ownerships:
+  - {person: p1, property: r_bps, share: 1, acquired: 2019-01-05, cause: new_build}
+  - {person: p1, property: r_blt, share: 1, acquired: 2018-05-20, cause: new_build}
+  - {person: p1, property: r_pps, share: 1, acquired: 2018-05-20, cause: purchase}
+  - {person: p1, property: r_plt, share: 1, acquired: 2020-02-25, cause: purchase}
+  - {person: p1, property: r_st, share: 1, acquired: 2019-09-01, cause: purchase}
+elections:
+  - {person: p1, kind: rental_exclusion, auto_optimize: true}
+
+---
+
+id: special-09
+label: ★복합 — 한 세대가 상속·일시적2주택·등록임대를 동시에 (부부 분산 보유)
+origin: special
+intent: |
+  특례 세 종류를 한 세대에 겹쳐 놓고, 인별 과세(종부세)와 세대 단위 주택수 판정이
+  서로 다른 축으로 움직일 때 특례가 어느 층에서 적용되는지 본다.
+  남편 p1: 종전주택(서울) + 신규주택(화성 동탄, 2024-05-30 취득) = 일시적 2주택
+  아내 p2: 상속주택 지분 1/3(공시 5.9억, 상속 2023-08-15) + 등록임대 1채
+  주체는 p1인데 특례 판정에 필요한 사실은 p2 쪽에 흩어져 있다.
+  특례를 모두 빼면 p1은 사실상 1주택, 세대는 여전히 여러 채인 상태가 된다.
+expectation: |
+  세 특례가 서로를 무효화하지 않아야 한다. 일시적 2주택 판정이 배우자의 상속·임대
+  주택 때문에 깨지는지, 아니면 특례주택은 주택수에서 먼저 빠지고 나서 판정하는지가
+  핵심이다. 적용 순서가 결과를 바꾸므로 산출물에 순서가 드러나야 한다.
+  p1 기준 계산과 세대 기준 판정이 뒤섞여 같은 주택이 두 번 세어지면 안 된다.
+tags: [복합, 상속, 일시적2주택, 임대, 부부, 적용순서]
+year: 2026
+years: [2026, 2027]
+tracks: [current, reform]
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1975-11-11, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1977-03-03, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: old_gangseo
+    name: 종전주택 (강서 화곡)
+    kind: apartment
+    dong: "1150010100"
+    urban: true
+    prices: {2026: 980_000_000, 2027: 980_000_000}
+  - id: new_dongtan
+    name: 신규주택 (화성 동탄)
+    kind: apartment
+    dong: "4159710100"
+    urban: true
+    prices: {2026: 1_200_000_000, 2027: 1_200_000_000}
+  - id: inh_jeju
+    name: 상속 지분 주택 (서귀포)
+    kind: detached
+    dong: "5013010100"
+    urban: false
+    prices: {2026: 590_000_000, 2027: 590_000_000}
+  - id: rent_cheonan
+    name: 등록임대 (천안 동남)
+    kind: apartment
+    dong: "4413010100"
+    urban: true
+    prices: {2026: 350_000_000, 2027: 350_000_000}
+    rental:
+      type: purchased_long_term
+      registered_on: 2021-02-01
+      obligation_end: 2031-02-01
+      rent_increase_within_cap: true
+ownerships:
+  - {person: p1, property: old_gangseo, share: 1, acquired: 2015-01-20, cause: purchase}
+  - {person: p1, property: new_dongtan, share: 1, acquired: 2024-05-30, cause: purchase}
+  - person: p2
+    property: inh_jeju
+    share: "1/3"
+    acquired: 2023-08-15
+    cause: inheritance
+    inherited: {date: 2023-08-15, share: "1/3", value: 190_000_000}
+  - {person: p2, property: rent_cheonan, share: 1, acquired: 2021-01-25, cause: purchase}
+residences:
+  - {person: p1, property: old_gangseo, start: 2015-01-20, end: 2024-05-29}
+  - {person: p1, property: new_dongtan, start: 2024-05-30}
+  - {person: p2, property: new_dongtan, start: 2024-05-30}
+elections:
+  - {person: p2, kind: rental_exclusion, year: 2026}
+
+---
+
+id: special-10
+label: 특례주택만 보유 — 다 빼고 나면 0채가 되는 세대
+origin: special
+intent: |
+  보유 주택이 상속주택(요건 충족) + 등록임대(요건 충족) 둘뿐이다.
+  주택수 제외와 합산배제를 문자 그대로 적용하면 남는 주택이 0채가 된다.
+  이때 (a) 세액 0으로 끝내는지 (b) 1주택자로 되돌려 기본공제 12억을 주는지
+  (c) 0채인데 1주택 공제를 적용해 음수 과세표준이 나오는지가 갈린다.
+  0으로 나누기나 빈 리스트 접근이 있으면 여기서 예외가 난다.
+expectation: |
+  과세 대상 주택이 남지 않으면 세액은 0이거나, 되돌림 규칙에 따라 한 채가 살아나
+  1주택 기준으로 계산되어야 한다. 어느 쪽이든 예외로 죽으면 안 되고,
+  "0채인데 12억 공제"처럼 음수 과세표준이 그대로 흘러가면 안 된다.
+tags: [특례만보유, 0채, 되돌림, 빈리스트]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 무주택같은유주택자, birth: 1958-06-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: inh_only
+    name: 상속받은 지방 주택 (목포)
+    kind: detached
+    dong: "4611010100"
+    urban: false
+    prices: {2026: 250_000_000}
+  - id: rent_only
+    name: 등록임대 (대구 중구)
+    kind: apartment
+    dong: "2711010100"
+    urban: true
+    prices: {2026: 420_000_000}
+    rental:
+      type: built_long_term
+      registered_on: 2022-04-01
+      obligation_end: 2032-04-01
+      rent_increase_within_cap: true
+ownerships:
+  - person: p1
+    property: inh_only
+    share: "1/4"
+    acquired: 2024-11-11
+    cause: inheritance
+    inherited: {date: 2024-11-11, share: "1/4", value: 62_500_000}
+  - {person: p1, property: rent_only, share: 1, acquired: 2022-03-20, cause: purchase}
+elections:
+  - {person: p1, kind: rental_exclusion, year: 2026}
+
+---
+
+id: special-11
+label: 특례주택에는 살고 본래 주택은 비어 있다 — 거주 판정의 대상이 갈리는 경우
+origin: special
+intent: |
+  본래 주택(서울, 고가)에는 아무도 살지 않고, 상속받은 지방 주택에 실제 거주 중이다.
+  1세대1주택 거주 관련 공제는 "과세 대상 주택에 거주"를 전제하는데,
+  거주 사실은 주택수에서 빠지는 특례주택 쪽에 붙어 있다.
+  거주 이력을 주택별로 보는지 사람별로 보는지에 따라 공제가 붙거나 떨어진다.
+  덧붙여 취학 사유(imputed_reason: schooling)로 본래 주택 거주가 중단된 구간을
+  하루도 겹치지 않게 붙여 두어, 간주 거주 처리가 이어지는지도 본다.
+expectation: |
+  거주 공제는 과세 대상이 되는 본래 주택 기준으로 판정되어야 한다.
+  특례주택 거주를 본래 주택 거주로 오인해 공제를 주면 과소 계산이다.
+  반대로 간주 거주 구간을 무시해 실제 거주 기간이 끊긴 것으로 보면 과대 계산이다.
+tags: [거주판정, 상속, 공가, 간주거주, 취학]
+year: 2026
+years: [2026, 2027, 2028]
+subject: p1
+prior_year_total_tax: 5_100_000
+persons:
+  - {id: p1, name: 지방거주자, birth: 1961-06-02, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: empty_seoul
+    name: 비어 있는 본래 주택 (송파 잠실)
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2026: 2_400_000_000, 2027: 2_400_000_000, 2028: 2_400_000_000}
+  - id: lived_inh
+    name: 실제 거주 중인 상속주택 (천안 동남)
+    kind: detached
+    dong: "4413010100"
+    urban: true
+    prices: {2026: 480_000_000, 2027: 480_000_000, 2028: 480_000_000}
+ownerships:
+  - {person: p1, property: empty_seoul, share: 1, acquired: 2009-07-01, cause: purchase}
+  - person: p1
+    property: lived_inh
+    share: "3/10"
+    acquired: 2022-09-30
+    cause: inheritance
+    inherited: {date: 2022-09-30, share: "3/10", value: 144_000_000}
+residences:
+  - {person: p1, property: empty_seoul, start: 2009-07-01, end: 2019-02-28}
+  - {person: p1, property: empty_seoul, start: 2019-03-01, end: 2022-09-29, imputed_reason: schooling}
+  - {person: p1, property: lived_inh, start: 2022-09-30}
+
+---
+
+id: special-12
+label: 사원용 주택 + 미분양 주택 + 공시가격 0원 지방주택 — 특례 3종의 바깥쪽
+origin: special
+intent: |
+  상속·임대가 아닌 나머지 특례 경로를 한 번에 건다.
+  ① company_housing: true 사원용 주택 (개인 명의인데 사원용 표시 — 통상 법인 요건이라
+     개인에게 붙었을 때 무시되는지 그대로 빼 주는지가 갈린다)
+  ② unsold_new: true 미분양 주택
+  ③ 공시가격 0원 주택 — 지방 저가 3억 이하 요건은 형식상 충족하지만 0원은
+     평가 미완료를 뜻할 수도 있다. 0으로 나누기·0 분모 비율 계산이 있으면 여기서 터진다.
+  본래 주택 한 채는 조정대상지역 고가로 두어 특례가 벗겨졌을 때 세액이 크게 흔들리게 했다.
+expectation: |
+  공시가격 0원이 정상 값으로 조용히 흘러가면 안 된다 — 0으로 계산하거나
+  판정 불가로 표시하거나 둘 중 하나여야 하고, 예외로 죽으면 안 된다.
+  사원용·미분양 표시가 개인 보유에도 무조건 적용되면 과소 계산 위험이 있으므로
+  적용/미적용 근거가 드러나야 한다.
+tags: [사원용, 미분양, 공시0원, 극단값, 개인법인혼동]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 사장님개인, birth: 1970-10-10, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: main_hannam
+    name: 본래 주택 (용산 한남)
+    kind: apartment
+    dong: "1117010100"
+    urban: true
+    prices: {2026: 3_200_000_000}
+  - id: corp_dorm
+    name: 사원용 주택 (천안 동남)
+    kind: multi_unit
+    dong: "4413010100"
+    urban: true
+    prices: {2026: 700_000_000}
+    company_housing: true
+  - id: unsold
+    name: 미분양 주택 (목포)
+    kind: apartment
+    dong: "4611010100"
+    urban: false
+    prices: {2026: 260_000_000}
+    unsold_new: true
+  - id: zero_price
+    name: 공시가격 0원 주택 (서귀포)
+    kind: detached
+    dong: "5013010100"
+    urban: false
+    prices: {2026: 0}
+ownerships:
+  - {person: p1, property: main_hannam, share: 1, acquired: 2010-01-01, cause: purchase}
+  - {person: p1, property: corp_dorm, share: 1, acquired: 2018-08-08, cause: purchase}
+  - {person: p1, property: unsold, share: 1, acquired: 2025-12-01, cause: new_build}
+  - {person: p1, property: zero_price, share: "1/1000", acquired: 2023-01-01, cause: gift}
+residences:
+  - {person: p1, property: main_hannam, start: 2010-01-01}

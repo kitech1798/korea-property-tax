@@ -69,6 +69,8 @@ class Observation:
     taxable_base: Won
     gross_tax: Won
     tax_credit: Won
+    net_tax: Won
+    """결정세액 — 농특세 제외. 세부담상한 비교의 법정 기준(종부령 §5 총세액상당액)."""
     house_count_household: int
     house_count_personal: int
     one_house: bool
@@ -79,6 +81,9 @@ class Observation:
     undecidable_steps: tuple[str, ...]
     alternatives: tuple[str, ...]
     trace_steps: tuple[str, ...]
+    property_tax_credit: Won = 0
+    formula_gaps: tuple[str, ...] = ()
+    """산식은 있는데 대입값이 없는 단계. 사용자가 손으로 검산할 수 없는 자리다."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,7 +160,9 @@ def _capture(stage: str, fn: Callable[[], Any]) -> tuple[Any, Failure | None]:
         )
 
 
-def _scan_trace(node: TraceNode) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+def _scan_trace(
+    node: TraceNode,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """trace 한 그루에서 관측 항목을 뽑는다.
 
     `unknowns`를 **step_id와 함께** 담는 이유: "어딘가 모르는 값이 있다"는
@@ -164,6 +171,7 @@ def _scan_trace(node: TraceNode) -> tuple[tuple[str, ...], tuple[str, ...], tupl
     unknowns: list[str] = []
     undecidable: list[str] = []
     steps: list[str] = []
+    gaps: list[str] = []
     for n in node.walk():
         steps.append(n.step_id)
         if n.output.unknown is not None:
@@ -171,8 +179,12 @@ def _scan_trace(node: TraceNode) -> tuple[tuple[str, ...], tuple[str, ...], tupl
         c = n.output.certainty
         if c.determination.name == "UNDECIDABLE":
             undecidable.append(n.step_id)
+        # 기호식만 있고 대입값이 없으면 "근거를 보여줬다"고 할 수 없다.
+        # 세무사에게 들고 갈 수 있어야 이 서비스의 차별점이 성립한다.
+        if n.formula and not n.substitution:
+            gaps.append(n.step_id)
     alts = tuple(f"{a.key}:{a.reason_ko}"[:160] for a in node.all_alternatives())
-    return tuple(unknowns), tuple(undecidable), alts, tuple(steps)
+    return tuple(unknowns), tuple(undecidable), alts, tuple(steps), tuple(gaps)
 
 
 def _won(value: Value) -> Won:
@@ -241,7 +253,7 @@ def run(scenario: Scenario, ruleset: RuleSet) -> Outcome:
             if sp_fail:
                 failures.append(sp_fail)
 
-            unknowns, undecidable, alts, steps = _scan_trace(result.trace)
+            unknowns, undecidable, alts, steps, gaps = _scan_trace(result.trace)
             obs.append(
                 Observation(
                     year=year,
@@ -252,6 +264,7 @@ def run(scenario: Scenario, ruleset: RuleSet) -> Outcome:
                     taxable_base=_won(result.taxable_base),
                     gross_tax=_won(result.gross_tax),
                     tax_credit=_won(result.tax_credit),
+                    net_tax=_won(result.net_tax),
                     house_count_household=special.count if special else (household.count if household else -1),
                     house_count_personal=special.personal_count if special else -1,
                     one_house=bool(special.is_one_house) if special else False,
@@ -261,6 +274,8 @@ def run(scenario: Scenario, ruleset: RuleSet) -> Outcome:
                     undecidable_steps=undecidable,
                     alternatives=alts,
                     trace_steps=steps,
+                    property_tax_credit=_won(result.property_tax_credit),
+                    formula_gaps=gaps,
                 )
             )
 
@@ -286,7 +301,7 @@ def run(scenario: Scenario, ruleset: RuleSet) -> Outcome:
             if fail:
                 failures.append(fail)
                 continue
-            _, undecidable, _, steps = _scan_trace(res.trace)
+            _, undecidable, _, steps, _ = _scan_trace(res.trace)
             gain = _won(res.gain)
             transfers.append(
                 TransferObservation(

@@ -1,0 +1,435 @@
+# 앵글: 부부 · 세대 · 공동명의
+#
+# 노리는 것: "인별 과세 + 세대별 판정"의 이중 구조.
+# 종부세는 사람마다 매기는데, 1세대1주택인지는 세대로 본다. 시중 계산기는
+# 이 둘을 한 덩어리로 뭉개서 부부 각자 1채씩을 "2주택자"로 계산한다.
+# 아래 12건은 그 이중 구조가 갈라지는 서로 다른 분기를 하나씩 찌른다.
+
+id: couple-01
+label: 부부 각자 단독 1채씩 · 각자 공시가격이 인별 기본공제 경계에서 1원 차이
+origin: couple
+intent: |
+  세대 주택수 2 · 인별 주택수 각 1. 여기에 인별 기본공제 경계를 1원 차이로 걸쳐 둔다.
+  남편 집은 9억 + 1원, 아내 집은 9억 − 1원.
+  세대를 기준으로 "다주택"이라 판정해 버리면 두 사람 다 과세표준이 생기고,
+  인별로 옳게 보면 남편만 1원어치 과세표준이 생긴다. 둘의 차이가 곧 버그 신호다.
+expectation: |
+  남편(p1)은 경계를 1원 넘겨 과세표준이 0보다 크고, 아내(p2)는 공제 이하라 0이다.
+  세대 합산으로 계산했다면 두 사람 모두 큰 과세표준이 잡히므로 즉시 드러난다.
+tags: [부부, 세대, 인별과세, 경계1원]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1974-05-02, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1976-11-30, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2], spouse_separately_registered: false}
+properties:
+  - {id: gangnam, name: 강남 아파트, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 900_000_001}}
+  - {id: haeundae, name: 해운대 아파트, kind: apartment, dong: "2647010100", urban: true, prices: {2026: 899_999_999}}
+ownerships:
+  - {person: p1, property: gangnam, share: 1, acquired: 2015-04-01}
+  - {person: p2, property: haeundae, share: 1, acquired: 2018-09-15}
+residences:
+  - {person: p1, property: gangnam, start: 2015-04-01}
+
+---
+
+id: couple-02
+label: 부부공동 1주택 특례 신청(명시) · 지분 1/2씩 · 70세 · 15년 거주
+origin: couple
+intent: |
+  특례를 신청하면 한 사람이 전부를 소유한 것처럼 보고 1인 기준 공제를 준다.
+  이때 연령·보유 세액공제는 "지정납세자 한 사람"의 나이와 이력으로 계산돼야 한다.
+  지분이 1/2인데 공제율까지 1/2로 깎아 버리는 이중 감액이 흔한 버그다.
+expectation: |
+  신청 트랙에서 한 사람에게 1주택 기준 공제가 붙고, 고령·장기보유 세액공제가
+  지분율로 재차 깎이지 않는다. 배우자에게는 별도 종부세가 생기지 않는다.
+tags: [부부공동, 특례신청, 고령자, 장기보유]
+year: 2026
+years: [2026, 2027]
+subject: p1
+joint_spouse_election: true
+prior_year_total_tax: 5_000_000
+persons:
+  - {id: p1, name: 갑, birth: 1956-02-10, household: h1, spouse: p2}
+  - {id: p2, name: 을, birth: 1958-07-22, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: jamsil
+    name: 잠실 아파트
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    area_m2: 114.8
+    prices: {2026: 3_000_000_000, 2027: 3_200_000_000}
+ownerships:
+  - {person: p1, property: jamsil, share: "1/2", acquired: 2011-03-05}
+  - {person: p2, property: jamsil, share: "1/2", acquired: 2011-03-05}
+residences:
+  - {person: p1, property: jamsil, start: 2011-03-05}
+  - {person: p2, property: jamsil, start: 2011-03-05}
+
+---
+
+id: couple-03
+label: couple-02와 완전히 같은 집 · 특례 미신청(명시)만 다름
+origin: couple
+intent: |
+  couple-02의 대조군. 사실은 한 글자도 다르지 않고 신청 여부만 뒤집는다.
+  미신청이면 각자 자기 지분만 인별 과세되고, 각자에게는 1주택 공제가 아니라
+  일반 기본공제가 붙으며 고령·장기 세액공제는 원칙적으로 붙지 않는다.
+  두 시나리오의 합계가 서로 뒤집히는지 보는 것이 목적이다.
+expectation: |
+  couple-02와 세액이 같으면 안 된다(신청 여부가 아무 영향을 못 준 것).
+  이 조합(30억·70세·15년 거주)에서는 신청 쪽이 유리한 방향이어야 자연스럽다.
+tags: [부부공동, 특례미신청, 대조군]
+year: 2026
+years: [2026, 2027]
+subject: p1
+joint_spouse_election: false
+prior_year_total_tax: 5_000_000
+persons:
+  - {id: p1, name: 갑, birth: 1956-02-10, household: h1, spouse: p2}
+  - {id: p2, name: 을, birth: 1958-07-22, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: jamsil
+    name: 잠실 아파트
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    area_m2: 114.8
+    prices: {2026: 3_000_000_000, 2027: 3_200_000_000}
+ownerships:
+  - {person: p1, property: jamsil, share: "1/2", acquired: 2011-03-05}
+  - {person: p2, property: jamsil, share: "1/2", acquired: 2011-03-05}
+residences:
+  - {person: p1, property: jamsil, start: 2011-03-05}
+  - {person: p2, property: jamsil, start: 2011-03-05}
+
+---
+
+id: couple-04
+label: 특례 신청 여부를 비워 둠 · 70세와 55세 부부 · 각자 지분이 1인 공제선을 1원 넘김
+origin: couple
+intent: |
+  유불리가 뒤집히는 구간을 정확히 겨눈다. 공시가격을 각자 지분이 1인 공제선을
+  딱 1원씩 넘도록 잡았다. 신청하면 늙은 쪽의 큰 세액공제를 쓰지만 공제 한 몫만 받고,
+  미신청이면 공제를 두 몫 받는 대신 세액공제를 거의 못 쓴다.
+  joint_spouse_election을 비워 엔진이 두 갈래를 직접 비교하게 만든다.
+  나이 차가 큰 부부(70세/55세)라 어느 쪽을 지정납세자로 두느냐로 또 갈린다.
+expectation: |
+  신청·미신청 두 갈래가 모두 산출되고 그중 유리한 쪽이 선택된다.
+  둘 중 하나만 계산하고 끝내거나, 지정납세자를 젊은 쪽으로 고정해 고령공제를
+  통째로 버리면 잘못이다.
+tags: [부부공동, 유불리역전, 경계1원, 연령차]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1956-01-01, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1971-01-01, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: bundang
+    name: 분당 아파트
+    kind: apartment
+    dong: "4113510100"
+    urban: true
+    prices: {2026: 2_800_000_002}
+ownerships:
+  - {person: p1, property: bundang, share: "1/2", acquired: 2009-06-30}
+  - {person: p2, property: bundang, share: "1/2", acquired: 2009-06-30}
+residences:
+  - {person: p1, property: bundang, start: 2009-06-30}
+  - {person: p2, property: bundang, start: 2009-06-30}
+
+---
+
+id: couple-05
+label: 지분 9:1 비대칭 부부공동 · 지분 작은 쪽(1/10)을 지정납세자로 지정 + auto_optimize 동시 지정
+origin: couple
+intent: |
+  elections 블록에 모순을 심는다. 지정납세자는 지분 1/10인 배우자인데
+  auto_optimize도 true다. 사람이 고른 값과 최적화가 충돌할 때 무엇이 이기는지,
+  그리고 지분 큰 사람이 원칙인 규정을 어떻게 처리하는지 본다.
+  거주는 지분 큰 쪽만 하고 있어 특례를 누구 이름으로 받느냐가 거주공제를 좌우한다.
+expectation: |
+  둘 중 하나로 결정되되 조용히 뭉개지지 않는다. 지정과 최적화가 충돌한다는 사실이
+  드러나거나, 한쪽 규칙이 일관되게 우선해야 한다. 지분 1/10 배우자를 납세자로 두고도
+  거주공제를 지분 9/10 배우자의 이력으로 가져다 쓰면 명백한 잘못이다.
+tags: [부부공동, 지분비대칭, 지정납세자, 모순]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 갑, birth: 1962-04-18, household: h1, spouse: p2}
+  - {id: p2, name: 을, birth: 1965-12-01, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: hannam
+    name: 한남동 주택
+    kind: detached
+    dong: "1117010100"
+    urban: true
+    prices: {2026: 4_500_000_000}
+ownerships:
+  - {person: p1, property: hannam, share: "9/10", acquired: 2013-08-20}
+  - {person: p2, property: hannam, share: "1/10", acquired: 2013-08-20}
+residences:
+  - {person: p1, property: hannam, start: 2013-08-20}
+elections:
+  - person: p2
+    kind: joint_spouse_special
+    year: 2026
+    designated_taxpayer: p2
+    auto_optimize: true
+
+---
+
+id: couple-06
+label: 3인 공동명의(부부 + 28세 자녀 각 1/3) · 자녀는 independent_members로 세대 분리
+origin: couple
+intent: |
+  공동명의 인원이 3인이면 부부공동 1주택 특례 자체가 적용되지 않는다.
+  동시에 자녀를 independent_members에 넣어 세대에서 떼어냈다.
+  자녀가 세대에서 빠지면 부모 세대는 1주택 세대인가, 자녀는 30세 미만인데
+  독립 생계로 인정되는가 — 두 판정이 서로 다른 축인데 뭉뚱그려지기 쉽다.
+expectation: |
+  부부공동 특례는 3인 공동소유라 적용되지 않고 각자 자기 지분(1/3)만 인별 과세된다.
+  자녀 분리 여부가 특례 판정에 영향을 주면 안 된다(특례를 막은 건 인원수지 세대가 아니다).
+tags: [3인공동명의, 세대분리, 30세미만, 자녀]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 아버지, birth: 1966-03-11, household: h1, spouse: p2}
+  - {id: p2, name: 어머니, birth: 1968-10-05, household: h1, spouse: p1}
+  - {id: p3, name: 자녀, birth: 1998-05-20, household: h1}
+households:
+  - {id: h1, members: [p1, p2, p3], independent_members: [p3]}
+properties:
+  - id: hwagok
+    name: 화곡동 아파트
+    kind: apartment
+    dong: "1150010100"
+    urban: true
+    prices: {2026: 2_100_000_000}
+ownerships:
+  - {person: p1, property: hwagok, share: "1/3", acquired: 2017-02-14}
+  - {person: p2, property: hwagok, share: "1/3", acquired: 2017-02-14}
+  - {person: p3, property: hwagok, share: "1/3", acquired: 2017-02-14}
+residences:
+  - {person: p1, property: hwagok, start: 2017-02-14}
+  - {person: p2, property: hwagok, start: 2017-02-14}
+
+---
+
+id: couple-07
+label: 배우자 지분을 나중에 넘겨받아 같은 집을 2회에 걸쳐 취득 · 거주가 2년에서 하루 모자란 채 양도
+origin: couple
+intent: |
+  한 주택에 취득일이 두 개다(2023년 1/2, 2024년 나머지 1/2).
+  보유·거주 기산을 첫 취득일로 볼지 마지막 취득일로 볼지에서 계산기가 갈린다.
+  거기에 거주 종료일을 2년에서 정확히 하루 모자라게 끊어 두었다.
+  조정대상지역 주택이라 2년 거주가 비과세의 문턱인데 하루가 비었다.
+expectation: |
+  거주기간이 2년에 미달해 1세대1주택 비과세를 못 받는다.
+  지분 취득일이 둘이라 보유기간·장기보유특별공제 기산이 지분별로 갈릴 수 있는데,
+  그 처리 방식이 결과에 드러나야 한다.
+tags: [분할취득, 배우자지분, 거주2년미달, 양도세, 하루차이]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 갑, birth: 1980-09-09, household: h1, spouse: p2}
+  - {id: p2, name: 을, birth: 1982-01-17, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: hanam
+    name: 하남 아파트
+    kind: apartment
+    dong: "4145010100"
+    urban: true
+    prices: {2026: 1_100_000_000}
+ownerships:
+  - {person: p1, property: hanam, share: "1/2", acquired: 2023-08-06, cause: purchase}
+  - {person: p1, property: hanam, share: "1/2", acquired: 2024-02-01, cause: gift}
+residences:
+  - {person: p1, property: hanam, start: 2023-08-06, end: 2025-08-04}
+transfer:
+  property: hanam
+  person: p1
+  date: 2026-09-01
+  price: 1_600_000_000
+  acquisition_price: 900_000_000
+  acquisition_date: 2023-08-06
+  necessary_expense: 12_000_000
+  share: 1
+
+---
+
+id: couple-08
+label: 주민등록만 따로 된 부부 · 각자 단독 1채씩 · 세법상은 여전히 한 세대
+origin: couple
+intent: |
+  spouse_separately_registered가 true다. 주민등록표가 갈렸다고 배우자가 별도 세대가
+  되지는 않는다(배우자는 원칙적으로 같은 세대). 이걸 그대로 믿고 세대를 둘로 쪼개면
+  두 사람 모두 각각 1세대1주택 대우를 받아 버린다.
+  각자 집값을 1주택 공제선 부근에 두어 오판이 곧바로 금액으로 드러나게 했다.
+expectation: |
+  주민등록 분리에도 불구하고 한 세대로 보아 1세대1주택 대우가 아니어야 한다.
+  두 사람 모두에게 1주택 기준 공제가 붙었다면 세대 판정이 무너진 것이다.
+tags: [세대판정, 주민등록분리, 부부, 각자단독]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1969-07-07, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1972-02-29, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2], spouse_separately_registered: true}
+properties:
+  - {id: yeoksam, name: 역삼 아파트, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 1_250_000_000}}
+  - {id: dongtan, name: 동탄 아파트, kind: apartment, dong: "4159710100", urban: true, prices: {2026: 1_250_000_000}}
+ownerships:
+  - {person: p1, property: yeoksam, share: 1, acquired: 2016-05-10}
+  - {person: p2, property: dongtan, share: 1, acquired: 2021-12-03}
+residences:
+  - {person: p1, property: yeoksam, start: 2016-05-10}
+  - {person: p2, property: dongtan, start: 2021-12-03}
+
+---
+
+id: couple-09
+label: 계산 대상은 무주택 · 배우자만 고가주택 1채 보유
+origin: couple
+intent: |
+  subject가 소유한 부동산이 한 건도 없다. 종부세는 인별 과세라 무주택자에게는
+  낼 세금이 없어야 한다. 그런데 세대에는 고가주택이 있다.
+  세대 재산을 subject 앞으로 끌어와 과세하는지, 아니면 소유가 없다는 이유로
+  아예 오류를 내며 죽는지를 본다(빈 소유 목록이라는 빈 값 케이스이기도 하다).
+expectation: |
+  subject(p1)에게는 종부세·재산세 부담이 발생하지 않는다.
+  "소유 없음"으로 예외를 던지고 멈추면 안 되고, 0으로 정상 산출돼야 한다.
+tags: [무주택, 배우자단독, 인별과세, 빈값]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 무주택 배우자, birth: 1978-06-12, household: h1, spouse: p2}
+  - {id: p2, name: 소유 배우자, birth: 1977-04-03, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - {id: hannam2, name: 한남동 아파트, kind: apartment, dong: "1117010100", urban: true, prices: {2026: 3_500_000_000}}
+ownerships:
+  - {person: p2, property: hannam2, share: 1, acquired: 2014-10-01}
+residences:
+  - {person: p1, property: hannam2, start: 2014-10-01}
+  - {person: p2, property: hannam2, start: 2014-10-01}
+
+---
+
+id: couple-10
+label: 비거주자인 배우자가 공동명의 지분을 보유 · 계산 대상이 그 비거주자
+origin: couple
+intent: |
+  세대원 한 명이 소득세법상 비거주자다(is_resident: false). 그리고 그 사람이 subject다.
+  비거주자는 1세대1주택 특례·거주 관련 공제 적용이 막히는 것이 정상인데,
+  거주 이력이 없다는 사실과 비거주자라는 신분은 서로 다른 축이다.
+  특례 신청 여부는 비워 두어 엔진이 비거주자에게도 신청 갈래를 열어 주는지 본다.
+expectation: |
+  비거주자 신분이 결과에 반영된다. 거주자와 똑같이 계산되면 신분 필드가
+  아무 데도 연결되지 않은 것이다. 거주 이력이 없는 것과 비거주자인 것이 구별돼야 한다.
+tags: [비거주자, 부부공동, 세대원, 특례]
+year: 2026
+subject: p2
+persons:
+  - {id: p1, name: 국내 배우자, birth: 1973-03-20, household: h1, spouse: p2, is_resident: true}
+  - {id: p2, name: 해외 배우자, birth: 1971-08-08, household: h1, spouse: p1, is_resident: false}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: yongsan
+    name: 용산 아파트
+    kind: apartment
+    dong: "1117010100"
+    urban: true
+    prices: {2026: 2_400_000_000}
+ownerships:
+  - {person: p1, property: yongsan, share: "1/2", acquired: 2012-11-11}
+  - {person: p2, property: yongsan, share: "1/2", acquired: 2012-11-11}
+residences:
+  - {person: p1, property: yongsan, start: 2012-11-11}
+
+---
+
+id: couple-11
+label: 부부공동 서울 1채 + 남편 단독 지방 저가주택이 3억을 1원 초과
+origin: couple
+intent: |
+  지방 저가주택은 일정 금액 이하일 때 주택 수에서 빼 준다. 그 금액을 1원 넘겼다.
+  1원 때문에 세대가 1주택이 아니게 되면 부부공동 1주택 특례의 전제 자체가 무너진다.
+  게다가 저가주택은 남편 단독, 서울 집은 부부공동이라 인별로는 남편만 2건,
+  아내는 1건이다. 인별 주택수와 세대 주택수와 특례 요건이 세 갈래로 갈린다.
+expectation: |
+  저가주택 특례 금액을 1원 넘겨 주택 수 제외를 못 받는 방향이어야 한다.
+  그 결과 부부공동 1주택 특례도 막히는지가 드러나야 하고,
+  아내(p2)와 남편(p1)의 처지가 달라진다.
+tags: [지방저가주택, 경계1원, 부부공동, 특례전제]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1964-01-30, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1966-09-14, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - {id: seoul_main, name: 역삼 아파트, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 2_000_000_000}}
+  - {id: mokpo, name: 목포 주택, kind: detached, dong: "4611010100", urban: false, prices: {2026: 300_000_001}}
+ownerships:
+  - {person: p1, property: seoul_main, share: "1/2", acquired: 2010-01-20}
+  - {person: p2, property: seoul_main, share: "1/2", acquired: 2010-01-20}
+  - {person: p1, property: mokpo, share: 1, acquired: 2022-06-15, cause: inheritance, inherited: {date: 2022-06-15, share: "1/1", value: 250_000_000}}
+residences:
+  - {person: p1, property: seoul_main, start: 2010-01-20}
+  - {person: p2, property: seoul_main, start: 2010-01-20}
+
+---
+
+id: couple-12
+label: 극단·결측 종합 — 지분 1/1000, 배우자 생년월일 없음, 배우자 관계 한쪽만 기재, 전년 세액 없음
+origin: couple
+intent: |
+  한 시나리오에 결측과 극단을 몰아넣는다.
+  ① 아내 지분이 1/1000이다(공동명의 최소 지분).
+  ② 아내의 생년월일이 없다 — 연령 세액공제 판정이 불가해야 하지 정상값으로 굴러가면 안 된다.
+  ③ p1은 배우자로 p2를 가리키는데 p2에는 spouse가 없다(관계 비대칭).
+     부부 관계를 어느 쪽 기재로 판단하는지가 갈린다.
+  ④ prior_year_total_tax가 없어 세부담상한이 판정 불가로 나와야 한다.
+  ⑤ 공시가격 100억이라 지분 1/1000이어도 아내에게 1천만원어치 지분이 잡힌다.
+expectation: |
+  결측은 결측으로 드러나야 한다 — 나이를 0세나 임의 값으로 채워 고령공제를 주거나,
+  전년 세액을 0으로 가정해 세부담상한을 계산해 버리면 잘못이다.
+  1/1000 지분에서 반올림·절사가 어떻게 처리되는지도 함께 드러난다.
+tags: [극단지분, 결측, 관계비대칭, 세부담상한, 100억]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 갑, birth: 1955-12-31, household: h1, spouse: p2}
+  - {id: p2, name: 을, household: h1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: mega
+    name: 초고가 단독주택
+    kind: detached
+    dong: "1117010100"
+    urban: true
+    prices: {2026: 10_000_000_000}
+ownerships:
+  - {person: p1, property: mega, share: "999/1000", acquired: 2005-05-05}
+  - {person: p2, property: mega, share: "1/1000", acquired: 2005-05-05}
+residences:
+  - {person: p1, property: mega, start: 2005-05-05}

@@ -150,6 +150,13 @@ def compute_property_tax(
             price,
             subject=_subject(prop),
             formula="과세기준일(6/1) 현재 공시가격",
+            # 산식만 있고 대입값이 없으면 화면에서 이 줄이 비어 보인다. 재산세 계산의
+            # **출발점**이라 여기가 비면 아래 모든 숫자의 출처를 따라갈 수 없다.
+            substitution=(
+                f"{case.year}년 {prop.display_name or prop.id}: {price_fact.value:,}원"
+                if price_fact is not None
+                else f"{case.year}년 공시가격 미입력"
+            ),
         )
     )
 

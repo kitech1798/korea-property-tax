@@ -98,6 +98,8 @@ def check(scenario: Scenario, outcome: Outcome, ruleset: RuleSet) -> tuple[Viola
         _transfer_sanity,
         _strategy_honesty,
         _trace_verifiability,
+        _property_tax_credit_bounded,
+        _burden_cap_respected,
         _determinism,
         _monotonic_in_price,
         _no_unexpected_cliff,
@@ -287,19 +289,108 @@ def _trace_verifiability(s: Scenario, o: Outcome, rs: RuleSet) -> Iterable[Viola
     "근거를 보여준다"가 이 서비스의 유일한 차별점인데, 기호식만 보여주는 것은
     보여주지 않는 것과 같다. 세무사에게 들고 갈 수 있어야 한다.
     """
-    seen: set[str] = set()
+    gaps: set[str] = set()
     for ob in o.observations:
-        for step in ob.trace_steps:
-            seen.add(step)
-    # 관측 단계에서 formula/substitution을 다시 얻으려면 trace가 필요하므로
-    # 여기서는 '단계 수'만 본다. 산식 짝 검사는 아래 run 단계에서 trace로 직접 한다.
-    if o.observations and len(seen) < 3:
+        gaps.update(ob.formula_gaps)
+    if gaps:
         yield Violation(
-            rule="trace_depth",
+            rule="formula_without_substitution",
             severity="warn",
-            detail_ko=f"trace 단계가 {len(seen)}개뿐이다. 근거를 보여줄 내용이 없다.",
-            evidence={"steps": sorted(seen)},
+            detail_ko=(
+                f"산식만 있고 대입값이 없는 단계 {len(gaps)}개: {', '.join(sorted(gaps)[:6])}. "
+                "사용자가 손으로 검산할 수 없다."
+            ),
+            evidence={"steps": sorted(gaps)},
         )
+
+
+# -- 7b. 재산세 공제는 낸 재산세를 넘지 못한다 -------------------------------
+
+
+def _property_tax_credit_bounded(s: Scenario, o: Outcome, rs: RuleSet) -> Iterable[Violation]:
+    """종부세 재산세공제가 **실제로 부담한 재산세**를 넘으면 이중공제다.
+
+    종부세법 §9③은 '주택분 재산세로 부과된 세액'을 공제한다고 정한다. 부과되지도
+    않은 재산세를 빼면 국가가 없는 세금을 돌려주는 셈이 된다. 지분 안분·특례주택
+    안분이 겹치는 자리라 실수가 나기 쉽다.
+    """
+    for ob in o.observations:
+        if ob.property_tax <= 0:
+            continue
+        if ob.property_tax_credit > ob.property_tax:
+            yield Violation(
+                rule="property_tax_credit_bounded",
+                severity="block",
+                detail_ko=(
+                    f"{ob.year}년 {ob.track}: 재산세 공제 {ob.property_tax_credit:,}원이 "
+                    f"실제 재산세 {ob.property_tax:,}원을 넘는다(종부세법 §9③)."
+                ),
+                evidence={"year": ob.year, "track": ob.track,
+                          "credit": ob.property_tax_credit, "property_tax": ob.property_tax},
+            )
+
+
+# -- 7c. 세부담상한이 실제로 걸리는가 ----------------------------------------
+
+
+def _burden_cap_respected(s: Scenario, o: Outcome, rs: RuleSet) -> Iterable[Violation]:
+    """직전연도 총세액을 알려줬으면 결과가 **상한을 넘을 수 없다.**
+
+    종부세법 §10 — 직전연도 총세액상당액의 150%(개인)를 초과하는 부분은 없는 것으로
+    본다. 시중 계산기가 '미반영'이라고 면책 문구로 적어 둔 바로 그 항목이라,
+    여기가 무너지면 우리도 같은 자리에서 무너진 것이다.
+
+    상한율은 룰셋에서 읽는다 — 코드에 박으면 개편안이 바꿀 때 검사가 거짓이 된다.
+    """
+    if s.prior_year_total_tax is None or s.prior_year_total_tax <= 0:
+        return
+    from realestate_tax.domain.models import PersonType, assessment_date
+
+    # ★ 단일세율 법인은 세부담상한을 **적용받지 않는다**(종부세법 §10 괄호, §9②3호 법인).
+    #   납세자 유형을 안 보고 검사하면 정상 동작을 위반으로 신고한다 —
+    #   실제로 multi-house-05가 그렇게 잡혔다. 검사기가 법을 모르면 소음만 만든다.
+    #   공익법인등(corporation_progressive)은 §9②3호가 아니므로 상한을 받는다.
+    subject = s.case.find_person(s.subject)
+    if subject.type is PersonType.CORPORATION:
+        return
+    taxpayer = "individual"
+
+    for ob in o.observations:
+        res = rs.resolve_or_none(
+            "jongbuse.house.burden_cap",
+            on=assessment_date(ob.year),
+            track=_TRACKS[ob.track],
+            taxpayer=taxpayer,
+        )
+        if res is None or res.block.value is None:
+            continue
+        if res.block.payload.get("applicable") is False:
+            continue
+        cap_rate = float(res.block.as_fraction()) if hasattr(res.block, "as_fraction") else None
+        if not cap_rate:
+            continue
+        ceiling = int(s.prior_year_total_tax * cap_rate)
+        # ★ 상한의 **기준**은 재산세+종부세 합계지만, 깎이는 것은 **종부세뿐**이다.
+        #   §10은 "주택분 종합부동산세액 … 초과하는 세액에 대해서는 없는 것으로 본다"고
+        #   정한다. 재산세는 지방세법 §122의 별도 상한을 따르므로 종부세법으로 깎을 수 없다.
+        #
+        #   그래서 합계가 상한을 넘는 것 자체는 위반이 아니다(재산세만으로 넘길 수 있다).
+        #   검사할 것은 **종부세가 남은 여유분을 넘지 않는가**이다. 이 검사가 잡는 실패:
+        #   상한율을 잘못 뽑음, 세액공제 전 금액에 상한을 걺, 재산세를 빼지 않음, 음수 허용.
+        allowed = max(0, ceiling - ob.property_tax)
+        if ob.net_tax > allowed + 1:
+            yield Violation(
+                rule="burden_cap_respected",
+                severity="block",
+                detail_ko=(
+                    f"{ob.year}년 {ob.track}: 결정세액 {ob.net_tax:,}원이 세부담상한 여유분 "
+                    f"{allowed:,}원(직전연도 {s.prior_year_total_tax:,} × {cap_rate} "
+                    f"− 재산세 {ob.property_tax:,})을 넘는다."
+                ),
+                evidence={"year": ob.year, "track": ob.track, "property_tax": ob.property_tax,
+                          "net": ob.net_tax, "allowed": allowed,
+                          "ceiling": ceiling, "cap_rate": cap_rate},
+            )
 
 
 # -- 8. 결정성 -------------------------------------------------------------
@@ -336,27 +427,37 @@ def _monotonic_in_price(s: Scenario, o: Outcome, rs: RuleSet) -> Iterable[Violat
     잘못 잡았거나 공제를 잘못 걸었다는 뜻이고, 그건 곧 "집값이 오르니 세금이 줄었다"는
     화면이 나온다는 뜻이다.
 
-    ★ 다만 세부담상한(직전연도 총세액 × 상한율)은 **직전연도 세액**에 걸린다.
-      시나리오가 prior_year_total_tax를 고정해 놓았으면 상한이 그대로여서 성질이
-      유지되지만, 역산 경로에서는 전년 공시가격도 함께 올라 상한도 오른다.
-      두 경우 모두 비감소이므로 검사는 유효하다.
+    ★ 무엇에 단조성을 걸 것인가가 이 검사의 전부다 — 처음엔 **종부세 단독**에 걸었다가
+      멀쩡한 엔진을 두 번 위반으로 신고했다(2026-08-05 실측에서 정정).
+
+      종부세법 §10은 `재산세 + 종부세 ≤ 직전연도 총세액상당액 × 상한율`을 걸고,
+      초과분에서 깎이는 것은 **종부세뿐**이다(재산세는 지방세법 §122 별도 상한 소관).
+      그래서 공시가격이 오르면 재산세가 오르고, 상한 여유분이 줄어 **종부세는 정상적으로
+      내려간다.** 조문이 그렇게 시킨 것이지 버그가 아니다.
+
+      농특세도 빼야 한다. 농특세는 종부세액 × 20%(농특세법 §5①8호)이므로 상한이
+      걸리는 순간 함께 줄어, 상한 경계에서 총액이 살짝 꺼질 수 있다. 이 역시 정상이다.
+
+      법이 실제로 보장하는 단조량은 **재산세 + 종부세 본세**다. 그것만 검사한다.
     """
     for ob in o.observations[:2]:
         base_case = st.project_case(s.case, ob.year, growth=s.growth)
         raised = _map_prices(base_case, lambda v: int(v * 1.10))
         after = recompute(s, rs, year=ob.year, track=ob.track, case=raised)
-        before_total = ob.jongbuse
-        after_total = after.total.as_int()
-        if after_total < before_total:
+        before = ob.property_tax + ob.net_tax
+        after_total = after.property_tax_total.as_int() + after.net_tax.as_int()
+        if after_total < before:
             yield Violation(
                 rule="monotonic_in_price",
                 severity="block",
                 detail_ko=(
-                    f"{ob.year}년 {ob.track}: 공시가격을 10% 올렸더니 종부세가 "
-                    f"{before_total:,}원 → {after_total:,}원으로 **줄었다**."
+                    f"{ob.year}년 {ob.track}: 공시가격을 10% 올렸더니 총세액상당액"
+                    f"(재산세+종부세 본세)이 {before:,}원 → {after_total:,}원으로 **줄었다**. "
+                    f"재산세 {ob.property_tax:,}→{after.property_tax_total.as_int():,}, "
+                    f"본세 {ob.net_tax:,}→{after.net_tax.as_int():,}"
                 ),
                 evidence={"year": ob.year, "track": ob.track,
-                          "before": before_total, "after": after_total},
+                          "before": before, "after": after_total},
             )
 
 
@@ -407,29 +508,66 @@ def _no_unexpected_cliff(s: Scenario, o: Outcome, rs: RuleSet) -> Iterable[Viola
 
 
 def _joint_spouse_optimal(s: Scenario, o: Outcome, rs: RuleSet) -> Iterable[Violation]:
-    """`auto_optimize`가 켜졌는데 **불리한 쪽**을 골랐으면 특례 비교가 깨진 것이다.
+    """부부공동명의 1주택자 특례가 **진술대로 반영**되고, 유리하면 **알려지는가**.
 
-    신청/미신청은 세액공제(고령·장기보유)까지 포함한 완전 계산 2회를 해야만 갈린다.
-    나이·거주기간에 따라 뒤집히는 구간이 실제로 있어서, 한쪽만 계산하면 반드시 틀린다.
+    ★ 처음엔 "엔진이 알아서 유리한 쪽을 고른다"로 검사했는데 그건 법을 잘못 읽은 것이다
+      (2026-08-05 실측에서 정정). 종부세법 §10의2는 "신청한 경우"에만 특례를 준다 —
+      9월 16~30일 관할세무서장에게 신청서를 내야 한다. 신청하지도 않은 사람에게
+      특례 세액을 보여주면 **실제로 낼 금액보다 적은 숫자**를 알려주는 것이다.
+
+      그래서 검사는 둘로 갈린다.
+        ① 신청을 진술했으면 그대로 반영돼야 한다.
+        ② 신청하지 않았고 신청이 유리하면 **행동 가능한 안내**가 떠야 한다.
+      ②가 없으면 사용자는 매년 수백만원을 모르고 흘려보낸다.
     """
-    if s.joint_spouse_election is not None:
-        return  # 사용자가 명시적으로 고정한 경우는 최적화 대상이 아니다
+    from realestate_tax.domain.models import ElectionKind
+
+    declared = s.case.election(s.subject, ElectionKind.JOINT_SPOUSE_SPECIAL)
+    person = s.case.find_person(s.subject)
+    spouse_declared = (
+        s.case.election(person.spouse_id, ElectionKind.JOINT_SPOUSE_SPECIAL)
+        if person.spouse_id
+        else None
+    )
+
     for ob in o.observations[:2]:
-        picked = ob.jongbuse
-        alt = recompute(s, rs, year=ob.year, track=ob.track, joint_spouse_election=True).total.as_int()
-        base = recompute(s, rs, year=ob.year, track=ob.track, joint_spouse_election=False).total.as_int()
-        best = min(alt, base)
-        if picked > best:
+        elected = recompute(s, rs, year=ob.year, track=ob.track, joint_spouse_election=True).total.as_int()
+        plain = recompute(s, rs, year=ob.year, track=ob.track, joint_spouse_election=False).total.as_int()
+        if elected == plain:
+            continue  # 요건 미충족 등으로 갈리지 않으면 볼 것이 없다
+
+        # ① 진술한 신청이 반영됐는가
+        mine = declared is not None and declared.designated_taxpayer in (None, s.subject)
+        theirs = spouse_declared is not None and spouse_declared.designated_taxpayer == s.subject
+        if (mine or theirs) and ob.jongbuse != elected:
             yield Violation(
-                rule="joint_spouse_optimal",
+                rule="election_honored",
                 severity="block",
                 detail_ko=(
-                    f"{ob.year}년 {ob.track}: 부부공동명의 특례 신청={alt:,}원, "
-                    f"미신청={base:,}원인데 결과는 {picked:,}원으로 유리한 쪽이 아니다."
+                    f"{ob.year}년 {ob.track}: 부부공동명의 특례 신청을 사건에 진술했는데 "
+                    f"결과가 미신청({ob.jongbuse:,}원)으로 계산됐다. 신청 시 {elected:,}원."
                 ),
                 evidence={"year": ob.year, "track": ob.track,
-                          "elected": alt, "not_elected": base, "picked": picked},
+                          "elected": elected, "picked": ob.jongbuse},
             )
+            continue
+
+        # ② 신청이 유리한데 안내가 없는가
+        #    이미 신청한 사람(옵션·진술)에게 "신청하세요"를 띄우라고 요구하면 안 된다.
+        if declared is None and not s.joint_spouse_election and elected < plain:
+            told = any(a.startswith("joint_spouse_special:") for a in ob.alternatives)
+            if not told:
+                yield Violation(
+                    rule="joint_spouse_advertised",
+                    severity="block",
+                    detail_ko=(
+                        f"{ob.year}년 {ob.track}: 특례를 신청하면 {plain - elected:,}원 "
+                        f"싼데({elected:,} vs {plain:,}) 화면에 안내가 없다. "
+                        "사용자는 신청할 수 있다는 사실 자체를 모른다."
+                    ),
+                    evidence={"year": ob.year, "track": ob.track,
+                              "elected": elected, "not_elected": plain},
+                )
 
 
 # -- 12. 지분 안분의 가산성 --------------------------------------------------

@@ -1,0 +1,453 @@
+# 앵글: 다주택 · 조정대상지역 · 법인
+# 노리는 것 — 세율표 분기(본인 1~2채 vs 3채 이상), 조정대상지역 중과,
+# 공정시장가액비율 분기, 법인 두 종류(단일세율 vs 누진), 주택 외 물건 혼입,
+# 그리고 "세대 주택수 ≠ 본인 주택수" 이중 구조.
+
+id: multi-house-01
+label: 부부가 각자 2채씩 — 세대 4채, 본인 2채
+origin: multi-house
+intent: |
+  세대 합산이 세율표에 새면 본인이 3주택 이상 세율을 맞는다.
+  종부세는 인별 과세이므로 p1은 본인 소유 2채만으로 세율표가 정해져야 한다.
+  조정지역 2채를 일부러 p1에게 몰아 넣어, 조정지역 중과가 세대 기준으로
+  잘못 발동하는지도 같이 본다.
+expectation: |
+  p1의 과세표준은 본인 소유 2채 합산으로만 잡히고, 배우자 소유 2채는 들어오지 않는다.
+  본인 주택수 2이므로 3주택 이상 중과세율표가 적용되면 안 된다.
+tags: [다주택, 부부, 세대, 세율표, 조정지역]
+year: 2026
+years: [2026, 2027]
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1971-05-12, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1974-09-30, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2], spouse_separately_registered: false}
+properties:
+  - {id: gangnam, name: 강남 아파트, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 1_800_000_000, 2027: 1_900_000_000}}
+  - {id: jamsil, name: 잠실 아파트, kind: apartment, dong: "1171010100", urban: true, prices: {2026: 1_600_000_000, 2027: 1_700_000_000}}
+  - {id: haeundae, name: 해운대 아파트, kind: apartment, dong: "2647010100", urban: true, prices: {2026: 900_000_000, 2027: 950_000_000}}
+  - {id: cheonan, name: 천안 아파트, kind: apartment, dong: "4413010100", urban: true, prices: {2026: 400_000_000, 2027: 420_000_000}}
+ownerships:
+  - {person: p1, property: gangnam, share: 1, acquired: 2016-03-02, cause: purchase}
+  - {person: p1, property: jamsil, share: 1, acquired: 2019-08-14, cause: purchase}
+  - {person: p2, property: haeundae, share: 1, acquired: 2018-01-09, cause: purchase}
+  - {person: p2, property: cheonan, share: 1, acquired: 2021-11-25, cause: purchase}
+residences:
+  - {person: p1, property: gangnam, start: 2016-03-02}
+
+---
+
+id: multi-house-02
+label: 본인 2채 + 지분 1/1000 한 채 — 주택수 2와 3의 경계
+origin: multi-house
+intent: |
+  소수지분 주택이 주택수에 산입되는지로 세율표가 2주택자와 3주택자로 갈린다.
+  지분 1/1000은 과세표준에는 사실상 기여하지 않지만 주택수 카운트는 1이다.
+  카운트가 지분으로 안분되어 "0채"가 되면 버그다.
+expectation: |
+  소수지분이라도 주택수 산입 여부에 따라 세율표가 갈리고, 그 판정이
+  결과에 명시적으로 드러나야 한다. 과세표준 기여는 극히 작다.
+tags: [다주택, 소수지분, 극단, 세율표, 경계]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 김소지, birth: 1980-02-29, household: h1}
+  - {id: p9, name: 공유자, birth: 1975-06-06, household: h9}
+households:
+  - {id: h1, members: [p1]}
+  - {id: h9, members: [p9]}
+properties:
+  - {id: yongsan, kind: apartment, dong: "1117010100", urban: true, prices: {2026: 2_400_000_000}}
+  - {id: bundang, kind: apartment, dong: "4113510100", urban: true, prices: {2026: 1_300_000_000}}
+  - {id: tiny, name: 지분 1/1000 아파트, kind: apartment, dong: "1150010100", urban: true, prices: {2026: 1_000_000_000}}
+ownerships:
+  - {person: p1, property: yongsan, share: 1, acquired: 2014-07-01, cause: purchase}
+  - {person: p1, property: bundang, share: 1, acquired: 2020-12-31, cause: purchase}
+  - {person: p1, property: tiny, share: "1/1000", acquired: 2025-10-17, cause: inheritance, inherited: {date: 2025-10-17, share: "1/1000", value: 1_000_000}}
+  - {person: p9, property: tiny, share: "999/1000", acquired: 2025-10-17, cause: inheritance, inherited: {date: 2025-10-17, share: "999/1000", value: 999_000_000}}
+
+---
+
+id: multi-house-03
+label: 조정대상지역만 3채 — 중과세율·공정시장가액비율 분기
+origin: multi-house
+intent: |
+  조정대상지역 3주택 이상의 중과 경로와 공정시장가액비율 분기를 정면으로 친다.
+  취득일을 전부 2025-10-16 이후로 잡아 조정지역 이력이 확보된 구간에 둔다.
+expectation: |
+  본인 주택수 3 이상 세율표가 적용되고, 개편안 트랙이 현행 트랙과 다른 궤적을 그린다.
+  세 채 모두 조정지역이므로 중과 판정이 "판정 불가"로 새면 안 된다.
+tags: [다주택, 조정지역, 중과, 공정시장가액비율]
+year: 2026
+years: [2026, 2027, 2028]
+growth: 0.05
+subject: p1
+prior_year_total_tax: 12_000_000
+persons:
+  - {id: p1, name: 이중과, birth: 1968-11-11, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - {id: a1, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 2_200_000_000}}
+  - {id: a2, kind: apartment, dong: "1171010100", urban: true, prices: {2026: 1_900_000_000}}
+  - {id: a3, kind: apartment, dong: "4145010100", urban: true, prices: {2026: 1_100_000_000}}
+ownerships:
+  - {person: p1, property: a1, share: 1, acquired: 2025-10-16, cause: purchase}
+  - {person: p1, property: a2, share: 1, acquired: 2025-10-17, cause: purchase}
+  - {person: p1, property: a3, share: 1, acquired: 2025-12-01, cause: purchase}
+residences:
+  - {person: p1, property: a1, start: 2025-10-16}
+
+---
+
+id: multi-house-04
+label: 조정 2 + 비조정 1 = 3주택 · 합산 9억 + 1원
+origin: multi-house
+intent: |
+  두 가지를 동시에 친다. ① 중과 판정 기준이 "전국 주택수"인지 "조정지역 소재 주택수"인지.
+  ② 기본공제 9억 경계에서 딱 1원을 넘긴 값(900,000,001).
+  1원 차이로 과세표준이 0원이 아니라 1원이 되어야 한다.
+expectation: |
+  과세표준이 아주 작은 양수로 잡히고 세액이 0원 근처에서 붙는다.
+  경계를 잘못 잡으면 과세 미달로 떨어져 전액 0원이 된다.
+tags: [다주택, 조정지역, 경계, 기본공제]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 박경계, birth: 1985-01-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - {id: b1, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 400_000_000}}
+  - {id: b2, kind: apartment, dong: "4159710100", urban: true, prices: {2026: 300_000_000}}
+  - {id: b3, kind: apartment, dong: "4611010100", urban: true, prices: {2026: 200_000_001}}
+ownerships:
+  - {person: p1, property: b1, share: 1, acquired: 2025-11-03, cause: purchase}
+  - {person: p1, property: b2, share: 1, acquired: 2025-11-04, cause: purchase}
+  - {person: p1, property: b3, share: 1, acquired: 2025-11-05, cause: purchase}
+
+---
+
+id: multi-house-05
+label: 법인(일반) 조정지역 3주택 — 기본공제 0 · 단일세율 · 세부담상한 미적용
+origin: multi-house
+intent: |
+  type: corporation의 세 가지 특칙을 한꺼번에 검증한다.
+  전년 세액을 아주 작게(1원) 주어, 세부담상한이 잘못 적용되면 세액이
+  1원 근처로 눌려 즉시 드러나게 만들었다.
+expectation: |
+  기본공제가 들어가지 않아 공시가격 전액이 과세표준 산정에 쓰이고,
+  누진구간 없이 단일세율이 적용되며, 전년 세액과 무관하게 세액이 나온다.
+tags: [법인, 조정지역, 단일세율, 세부담상한]
+year: 2026
+subject: c1
+prior_year_total_tax: 1
+persons:
+  - {id: c1, name: 갑부동산개발주식회사, type: corporation, is_resident: true}
+properties:
+  - {id: c1a, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 2_000_000_000}}
+  - {id: c1b, kind: apartment, dong: "1171010100", urban: true, prices: {2026: 1_500_000_000}}
+  - {id: c1c, kind: apartment, dong: "4113510100", urban: true, prices: {2026: 1_000_000_000}}
+ownerships:
+  - {person: c1, property: c1a, share: 1, acquired: 2025-10-20, cause: purchase}
+  - {person: c1, property: c1b, share: 1, acquired: 2025-10-21, cause: purchase}
+  - {person: c1, property: c1c, share: 1, acquired: 2025-10-22, cause: purchase}
+
+---
+
+id: multi-house-06
+label: 공익법인(누진) — 05와 동일 물건, 세율표만 개인형
+origin: multi-house
+intent: |
+  corporation_progressive가 corporation과 실제로 다른 분기를 타는지 대조군으로 확인한다.
+  물건·연도·전년세액을 05와 완전히 동일하게 맞췄으므로, 두 결과가 같으면
+  법인 유형 분기가 작동하지 않은 것이다.
+expectation: |
+  기본공제 9억이 적용되고 누진세율표를 타므로 05(일반 법인)보다 세액이 낮다.
+  세대·거주 관련 공제는 법인이므로 어느 쪽에도 붙지 않는다.
+tags: [법인, 공익법인, 누진세율, 대조군]
+year: 2026
+subject: c2
+prior_year_total_tax: 1
+persons:
+  - {id: c2, name: 사회복지법인 을재단, type: corporation_progressive, is_resident: true}
+properties:
+  - {id: c2a, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 2_000_000_000}}
+  - {id: c2b, kind: apartment, dong: "1171010100", urban: true, prices: {2026: 1_500_000_000}}
+  - {id: c2c, kind: apartment, dong: "4113510100", urban: true, prices: {2026: 1_000_000_000}}
+ownerships:
+  - {person: c2, property: c2a, share: 1, acquired: 2025-10-20, cause: purchase}
+  - {person: c2, property: c2b, share: 1, acquired: 2025-10-21, cause: purchase}
+  - {person: c2, property: c2c, share: 1, acquired: 2025-10-22, cause: purchase}
+
+---
+
+id: multi-house-07
+label: 법인과 개인이 한 집을 1/2씩 공동소유 — 지분별로 다른 세율표
+origin: multi-house
+intent: |
+  같은 물건 하나를 법인 지분과 개인 지분이 나눠 가진다.
+  개인 p1은 이 지분 때문에 본인 주택수가 2에서 3으로 넘어가고,
+  법인 c3은 같은 물건에서 기본공제 0·단일세율을 타야 한다.
+  물건 단위로 납세의무자를 하나로 뭉개면 여기서 깨진다.
+expectation: |
+  개인 지분과 법인 지분이 각각 별도 납세의무로 분리되어 계산된다.
+  subject는 개인 p1이므로 p1 결과에 법인 지분이 섞이면 안 된다.
+tags: [법인, 개인, 공동소유, 지분, 조정지역]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 정공동, birth: 1979-04-18, household: h1}
+  - {id: c3, name: 병자산관리주식회사, type: corporation, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - {id: shared, name: 하남 공동소유 아파트, kind: apartment, dong: "4145010100", urban: true, prices: {2026: 1_400_000_000}}
+  - {id: solo1, kind: apartment, dong: "1150010100", urban: true, prices: {2026: 1_000_000_000}}
+  - {id: solo2, kind: apartment, dong: "2711010100", urban: true, prices: {2026: 600_000_000}}
+ownerships:
+  - {person: p1, property: shared, share: "1/2", acquired: 2025-11-10, cause: purchase}
+  - {person: c3, property: shared, share: "1/2", acquired: 2025-11-10, cause: purchase}
+  - {person: p1, property: solo1, share: 1, acquired: 2017-02-20, cause: purchase}
+  - {person: p1, property: solo2, share: 1, acquired: 2022-06-30, cause: purchase}
+
+---
+
+id: multi-house-08
+label: 20채 보유 · 공시가격 0원 한 채 포함 — 극단 규모
+origin: multi-house
+intent: |
+  주택수 20에서 세율표·주택수 카운트·합산 루프가 버티는지 본다.
+  조정지역과 비조정지역을 섞었고, 공시가격이 0원인 물건을 한 채 끼워
+  0으로 나누기나 0원 물건의 주택수 산입 처리를 같이 친다.
+expectation: |
+  20채가 모두 인별 합산되고 3주택 이상 세율표를 탄다.
+  공시가격 0원 물건도 주택수에는 산입되어야 하며, 계산이 예외로 끊기면 안 된다.
+tags: [다주택, 극단, 20채, 영원, 조정지역]
+year: 2026
+subject: p1
+prior_year_total_tax: 80_000_000
+persons:
+  - {id: p1, name: 최다수, birth: 1962-12-25, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - {id: h01, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 900_000_000}}
+  - {id: h02, kind: apartment, dong: "1171010100", urban: true, prices: {2026: 850_000_000}}
+  - {id: h03, kind: apartment, dong: "1117010100", urban: true, prices: {2026: 800_000_000}}
+  - {id: h04, kind: apartment, dong: "1150010100", urban: true, prices: {2026: 750_000_000}}
+  - {id: h05, kind: apartment, dong: "4113510100", urban: true, prices: {2026: 700_000_000}}
+  - {id: h06, kind: apartment, dong: "4145010100", urban: true, prices: {2026: 650_000_000}}
+  - {id: h07, kind: apartment, dong: "4159710100", urban: true, prices: {2026: 600_000_000}}
+  - {id: h08, kind: apartment, dong: "2647010100", urban: true, prices: {2026: 550_000_000}}
+  - {id: h09, kind: apartment, dong: "2711010100", urban: true, prices: {2026: 500_000_000}}
+  - {id: h10, kind: apartment, dong: "4413010100", urban: true, prices: {2026: 450_000_000}}
+  - {id: h11, kind: apartment, dong: "4611010100", urban: true, prices: {2026: 400_000_000}}
+  - {id: h12, kind: apartment, dong: "5013010100", urban: true, prices: {2026: 350_000_000}}
+  - {id: h13, kind: detached, dong: "4611010100", urban: false, prices: {2026: 300_000_000}}
+  - {id: h14, kind: detached, dong: "5013010100", urban: false, prices: {2026: 250_000_000}}
+  - {id: h15, kind: multi_unit, dong: "2711010100", urban: true, prices: {2026: 200_000_000}}
+  - {id: h16, kind: multi_unit, dong: "4413010100", urban: true, prices: {2026: 150_000_000}}
+  - {id: h17, kind: officetel_residential, dong: "1168010100", urban: true, prices: {2026: 120_000_000}}
+  - {id: h18, kind: officetel_residential, dong: "1171010100", urban: true, prices: {2026: 100_000_000}}
+  - {id: h19, kind: apartment, dong: "2647010100", urban: true, prices: {2026: 1}}
+  - {id: h20, name: 공시가격 0원 주택, kind: detached, dong: "4611010100", urban: false, prices: {2026: 0}}
+ownerships:
+  - {person: p1, property: h01, share: 1, acquired: 2010-01-05, cause: purchase}
+  - {person: p1, property: h02, share: 1, acquired: 2010-06-05, cause: purchase}
+  - {person: p1, property: h03, share: 1, acquired: 2011-01-05, cause: purchase}
+  - {person: p1, property: h04, share: 1, acquired: 2011-06-05, cause: purchase}
+  - {person: p1, property: h05, share: 1, acquired: 2012-01-05, cause: purchase}
+  - {person: p1, property: h06, share: 1, acquired: 2012-06-05, cause: purchase}
+  - {person: p1, property: h07, share: 1, acquired: 2013-01-05, cause: purchase}
+  - {person: p1, property: h08, share: 1, acquired: 2013-06-05, cause: purchase}
+  - {person: p1, property: h09, share: 1, acquired: 2014-01-05, cause: purchase}
+  - {person: p1, property: h10, share: 1, acquired: 2014-06-05, cause: purchase}
+  - {person: p1, property: h11, share: 1, acquired: 2015-01-05, cause: purchase}
+  - {person: p1, property: h12, share: 1, acquired: 2015-06-05, cause: purchase}
+  - {person: p1, property: h13, share: 1, acquired: 2016-01-05, cause: purchase}
+  - {person: p1, property: h14, share: 1, acquired: 2016-06-05, cause: purchase}
+  - {person: p1, property: h15, share: 1, acquired: 2017-01-05, cause: purchase}
+  - {person: p1, property: h16, share: 1, acquired: 2017-06-05, cause: purchase}
+  - {person: p1, property: h17, share: 1, acquired: 2018-01-05, cause: purchase}
+  - {person: p1, property: h18, share: 1, acquired: 2018-06-05, cause: purchase}
+  - {person: p1, property: h19, share: 1, acquired: 2019-01-05, cause: purchase}
+  - {person: p1, property: h20, share: 1, acquired: 2019-06-05, cause: purchase}
+
+---
+
+id: multi-house-09
+label: 주택 2채 + 종합합산토지 + 별도합산토지 + 일반건축물
+origin: multi-house
+intent: |
+  주택 외 물건이 주택수에 산입되면 본인이 2주택자에서 3주택 이상으로 잘못 넘어간다.
+  동시에 종합합산토지·별도합산토지는 주택과 별개 과세대상으로 각자의 공제·세율표를
+  타야 한다. 세 과세대상이 한 사람 안에서 섞이지 않는지 본다.
+expectation: |
+  주택 세율표는 본인 주택수 2 기준으로 잡히고, 토지·일반건축물은 별도 과세대상으로
+  분리 계산된다. 주택 합산액에 토지 공시가격이 더해지면 명백한 오류다.
+tags: [다주택, 토지, 일반건축물, 과세대상분리]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 한혼합, birth: 1966-08-08, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - {id: hs1, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 1_700_000_000}}
+  - {id: hs2, kind: apartment, dong: "2647010100", urban: true, prices: {2026: 900_000_000}}
+  - {id: ld1, name: 나대지, kind: land_comprehensive, dong: "4413010100", urban: true, prices: {2026: 1_200_000_000}}
+  - {id: ld2, name: 공장 부속토지, kind: land_separate, dong: "4611010100", urban: false, prices: {2026: 5_000_000_000}}
+  - {id: bd1, name: 근린상가, kind: building_other, dong: "2711010100", urban: true, prices: {2026: 800_000_000}}
+ownerships:
+  - {person: p1, property: hs1, share: 1, acquired: 2013-03-15, cause: purchase}
+  - {person: p1, property: hs2, share: 1, acquired: 2021-09-01, cause: purchase}
+  - {person: p1, property: ld1, share: 1, acquired: 2009-05-20, cause: purchase}
+  - {person: p1, property: ld2, share: "1/3", acquired: 2011-10-10, cause: purchase}
+  - {person: p1, property: bd1, share: 1, acquired: 2015-12-24, cause: purchase}
+residences:
+  - {person: p1, property: hs1, start: 2013-03-15}
+
+---
+
+id: multi-house-10
+label: 본인 2채 합산이 정확히 9억원 — 기본공제 경계 하한
+origin: multi-house
+intent: |
+  다주택자 기본공제 9억 경계에 정확히 붙인다(500,000,000 + 400,000,000).
+  "9억 초과"인지 "9억 이상"인지에 따라 과세 여부가 통째로 갈린다.
+  같은 세대에 배우자가 별도로 3채를 갖고 있어, 세대 합산이 새면 즉시 과세로 튄다.
+expectation: |
+  p1의 합산액이 기본공제와 정확히 같으므로 과세표준은 0원이고 종부세는 발생하지 않는다.
+  배우자 3채가 p1 쪽으로 새어 들어오면 과세표준이 양수가 되어 드러난다.
+tags: [다주택, 경계, 기본공제, 부부, 세대]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 오정확, birth: 1977-07-07, household: h1, spouse: p2}
+  - {id: p2, name: 오배우, birth: 1978-03-03, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2], spouse_separately_registered: false}
+properties:
+  - {id: e1, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 500_000_000}}
+  - {id: e2, kind: apartment, dong: "4413010100", urban: true, prices: {2026: 400_000_000}}
+  - {id: e3, kind: apartment, dong: "1171010100", urban: true, prices: {2026: 1_500_000_000}}
+  - {id: e4, kind: apartment, dong: "4113510100", urban: true, prices: {2026: 1_100_000_000}}
+  - {id: e5, kind: apartment, dong: "2647010100", urban: true, prices: {2026: 700_000_000}}
+ownerships:
+  - {person: p1, property: e1, share: 1, acquired: 2020-02-02, cause: purchase}
+  - {person: p1, property: e2, share: 1, acquired: 2021-04-04, cause: purchase}
+  - {person: p2, property: e3, share: 1, acquired: 2016-05-05, cause: purchase}
+  - {person: p2, property: e4, share: 1, acquired: 2018-06-06, cause: purchase}
+  - {person: p2, property: e5, share: 1, acquired: 2019-07-07, cause: purchase}
+
+---
+
+id: multi-house-11
+label: 세대분리 등록 부부 각자 3채 + 30세 미만 독립세대원 1채 — 모순 구성
+origin: multi-house
+intent: |
+  세대 판정을 흔든다. 부부는 주민등록상 따로 등재(spouse_separately_registered: true)이지만
+  spouse 관계는 살아 있다. 세법은 배우자를 별도 세대로 인정하지 않는데,
+  independent_members에 든 자녀는 별도 세대다. 두 규칙이 한 세대 안에 동시에 있다.
+  또 부부 공동명의 특례를 신청하는데 각자 3주택이라 특례 요건 자체가 성립하지 않는다.
+expectation: |
+  배우자 세대분리는 인정되지 않고, 자녀는 별도 세대로 갈린다.
+  각자 3주택이므로 부부 공동명의 1주택 특례는 적용 대상이 아니어서 신청이 기각되거나
+  무시되어야 하고, 조용히 적용되면 안 된다.
+tags: [세대, 모순, 부부공동명의특례, 다주택, 독립세대원]
+year: 2026
+subject: p1
+joint_spouse_election: true
+persons:
+  - {id: p1, name: 남편, birth: 1969-10-01, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1970-01-31, household: h1, spouse: p1}
+  - {id: p3, name: 자녀, birth: 2001-05-05, household: h1}
+households:
+  - {id: h1, members: [p1, p2, p3], spouse_separately_registered: true, independent_members: [p3]}
+properties:
+  - {id: f1, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 1_600_000_000}}
+  - {id: f2, kind: apartment, dong: "1171010100", urban: true, prices: {2026: 1_200_000_000}}
+  - {id: f3, kind: apartment, dong: "1117010100", urban: true, prices: {2026: 1_000_000_000}}
+  - {id: f4, kind: apartment, dong: "4113510100", urban: true, prices: {2026: 1_300_000_000}}
+  - {id: f5, kind: apartment, dong: "4145010100", urban: true, prices: {2026: 1_100_000_000}}
+  - {id: f6, kind: apartment, dong: "4159710100", urban: true, prices: {2026: 900_000_000}}
+  - {id: f7, kind: apartment, dong: "5013010100", urban: true, prices: {2026: 400_000_000}}
+ownerships:
+  - {person: p1, property: f1, share: 1, acquired: 2015-01-15, cause: purchase}
+  - {person: p1, property: f2, share: 1, acquired: 2017-03-17, cause: purchase}
+  - {person: p1, property: f3, share: 1, acquired: 2019-05-19, cause: purchase}
+  - {person: p2, property: f4, share: 1, acquired: 2016-02-16, cause: purchase}
+  - {person: p2, property: f5, share: 1, acquired: 2018-04-18, cause: purchase}
+  - {person: p2, property: f6, share: 1, acquired: 2020-06-20, cause: purchase}
+  - {person: p3, property: f7, share: 1, acquired: 2024-08-08, cause: gift}
+elections:
+  - {person: p1, kind: joint_spouse_special, year: 2026, designated_taxpayer: p1, auto_optimize: false}
+residences:
+  - {person: p1, property: f1, start: 2015-01-15}
+
+---
+
+id: multi-house-12
+label: 조정지역 3채 중 등록임대 1채 합산배제 + 미분양 1채 — 주택수 3→2 경계
+origin: multi-house
+intent: |
+  합산배제가 적용되면 본인 주택수가 3에서 2로 떨어져 세율표가 통째로 바뀐다.
+  합산배제 신청은 했지만 임대 의무기간이 2026년 중에 끝나고, 임대료 상한도
+  지키지 않은 상태다. 요건 미달인데 합산배제가 그냥 먹히면 버그다.
+  미분양 신축(unsold_new)과 사원용 주택도 한 사람 안에 함께 둬 배제 사유를 겹쳐 놓았다.
+expectation: |
+  임대료 상한 위반이면 합산배제가 거부되어 주택수 3 기준 세율표를 타야 한다.
+  합산배제가 인정되는 경로와 거부되는 경로가 결과에서 구분되어 보여야 한다.
+tags: [다주택, 조정지역, 등록임대, 합산배제, 미분양, 사원용주택, 복합]
+year: 2026
+years: [2026, 2027]
+tracks: [current, reform]
+subject: p1
+prior_year_total_tax: 5_000_000
+persons:
+  - {id: p1, name: 임대인, birth: 1958-09-30, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: g1
+    name: 거주 중인 강남 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 2_100_000_000}
+  - id: g2
+    name: 등록임대 (의무기간 2026년 중 종료 · 임대료 상한 위반)
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2026: 1_400_000_000}
+    rental:
+      type: purchased_long_term
+      registered_on: 2018-06-15
+      obligation_end: 2026-06-14
+      rent_increase_within_cap: false
+  - id: g3
+    name: 미분양 신축
+    kind: apartment
+    dong: "4145010100"
+    urban: true
+    prices: {2026: 800_000_000}
+    unsold_new: true
+  - id: g4
+    name: 사원용 주택
+    kind: detached
+    dong: "4413010100"
+    urban: false
+    prices: {2026: 300_000_000}
+    company_housing: true
+ownerships:
+  - {person: p1, property: g1, share: 1, acquired: 2012-04-01, cause: purchase}
+  - {person: p1, property: g2, share: 1, acquired: 2018-06-15, cause: purchase}
+  - {person: p1, property: g3, share: 1, acquired: 2025-11-20, cause: new_build}
+  - {person: p1, property: g4, share: 1, acquired: 2016-08-08, cause: purchase}
+residences:
+  - {person: p1, property: g1, start: 2012-04-01}
+elections:
+  - {person: p1, kind: rental_exclusion, year: 2026, auto_optimize: false}

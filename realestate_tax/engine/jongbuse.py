@@ -26,6 +26,7 @@ from typing import Mapping, Sequence
 
 from ..domain.certainty import Certainty, DeterminationQuality
 from ..domain.models import (
+    ElectionKind,
     PersonId,
     PersonType,
     PropertyId,
@@ -184,7 +185,7 @@ def compute_jongbuse(
     solely_owned = all(s == 1 for s in share_by_property.values())
 
     joint = _joint_spouse_status(case, person_id)
-    elected = options.joint_spouse_election and joint.eligible
+    elected, elected_why = _joint_spouse_elected(case, person_id, options, joint)
 
     one_house = (
         False
@@ -194,7 +195,9 @@ def compute_jongbuse(
     )
 
     children.append(
-        _house_count_node(case, person_id, assessment, one_house, joint, elected, subject)
+        _house_count_node(
+            case, person_id, assessment, one_house, joint, elected, subject, elected_why
+        )
     )
 
     # ── 재산세 먼저 계산한다. 종부세가 재산세를 입력으로 쓰기 때문이다. ──
@@ -740,6 +743,50 @@ def _is_heavy_group(house_count: int, one_house: bool) -> bool:
     return house_count >= 3 and not one_house
 
 
+def _joint_spouse_elected(
+    case: TaxCase,
+    person_id: PersonId,
+    options: JongbuseOptions,
+    joint: JointSpouseStatus,
+) -> tuple[bool, str]:
+    """부부공동명의 1주택자 특례를 **신청한 것으로 볼 것인가**(종부세법 §10의2).
+
+    ★ 사건에 적힌 `Election`을 엔진이 읽지 않고 있었다(SIM-04, 2026-08-05 시뮬레이션).
+      도메인이 '선택'을 1급 엔티티로 두고 사용자가 "신청했다"고 진술해도, 옵션으로
+      따로 넘기지 않으면 전부 미신청으로 계산됐다. 같은 실수의 세 번째다
+      (ResidenceSpell → 거주기간 → Election). **모델에 있는 사실은 엔진이 읽어야 한다.**
+
+    우선순위는 명시적인 쪽부터다.
+      ① 호출자가 옵션으로 지정 — 특례 비교(compare_joint_spouse_election)가 이 경로로
+         양쪽을 강제 계산하므로 사건의 진술보다 우선해야 한다.
+      ② 사건에 적힌 신청 진술.
+      ③ 아무것도 없으면 **미신청**. §10의2는 "신청한 경우"에만 특례를 준다 —
+         9월 16~30일에 신청서를 내야 한다. 신청하지 않은 사람에게 특례 세액을 보여주면
+         실제로 낼 금액보다 적은 숫자를 알려주는 것이다. 대신 유리하면 대안으로 안내한다.
+    """
+    if not joint.eligible:
+        return False, ""
+    if options.joint_spouse_election:
+        return True, "신청(옵션 지정)"
+
+    mine = case.election(person_id, ElectionKind.JOINT_SPOUSE_SPECIAL)
+    if mine is not None:
+        if mine.designated_taxpayer in (None, person_id):
+            return True, "신청(본인을 납세의무자로 지정)"
+        # 배우자를 납세의무자로 지정했다면 **이 사람은 납세의무자가 아니다.**
+        # 배우자 지분까지 합쳐 배우자에게 과세되므로 본인 몫을 따로 계산하면 이중과세다.
+        # 그 재귀속을 아직 구현하지 않았으므로 조용히 미신청으로 계산하지 않고 드러낸다.
+        return False, f"배우자({mine.designated_taxpayer})를 납세의무자로 지정 — 본인 과세분 재귀속 미구현"
+
+    person = case.find_person(person_id)
+    if person.spouse_id is not None:
+        theirs = case.election(person.spouse_id, ElectionKind.JOINT_SPOUSE_SPECIAL)
+        if theirs is not None and theirs.designated_taxpayer == person_id:
+            return True, "신청(배우자가 본인을 납세의무자로 지정)"
+
+    return False, ""
+
+
 def _joint_spouse_status(case: TaxCase, person_id: PersonId) -> JointSpouseStatus:
     """부부공동명의 1주택자 특례 요건 판정(종부세법 §10의2, 시행령 §5의2②).
 
@@ -801,9 +848,25 @@ def _house_count_node(
     joint: JointSpouseStatus,
     elected: bool,
     subject: SubjectRef,
+    elected_why: str = "",
 ) -> TraceNode:
     alternatives: tuple[Alternative, ...] = ()
-    if joint.eligible and not elected:
+    if "재귀속 미구현" in elected_why:
+        # 배우자를 납세의무자로 지정한 신청이 있다 = **이 사람은 납세의무자가 아니다.**
+        # 그대로 미신청으로 계산해 숫자를 내면 배우자와 이중으로 과세된 금액을 보여준다.
+        alternatives = (
+            Alternative(
+                key="joint_spouse_designated_spouse",
+                label_ko="부부공동명의 특례 — 배우자를 납세의무자로 지정",
+                reason_ko=(
+                    "배우자를 납세의무자로 지정한 신청이 있어 이 주택의 종합부동산세는 "
+                    "배우자에게 합산 과세됩니다. 아래 금액은 그 합산을 반영하지 않은 "
+                    "본인 지분 기준이므로 실제 고지와 다를 수 있습니다 — 세무서 확인이 필요합니다."
+                ),
+                actionable=True,
+            ),
+        )
+    elif joint.eligible and not elected:
         alternatives = (
             Alternative(
                 key="joint_spouse_special",
