@@ -18,6 +18,7 @@ from realestate_tax.sources import (
     parse_prices,
     parse_units,
 )
+from realestate_tax.sources import building_hub as hub
 from realestate_tax.sources.building_hub import PLAT_LAND, PLAT_MOUNTAIN
 
 
@@ -277,3 +278,79 @@ def test_실제_아파트에서_동_호_공시가격이_100퍼센트_조인된�
     sample = next(j for j in joined if j.is_resolved)
     assert sample.unit.dong_nm and sample.unit.ho_nm
     assert sample.price.base_date.month == 1 and sample.price.base_date.day == 1
+
+
+# --------------------------------------------------------------------------
+# ★ 속도와 회복력 (2026-08-05)
+#   실사용에서 40초가 걸렸고, 속도를 재려다 429로 API가 막혀 앱이 죽었다.
+# --------------------------------------------------------------------------
+
+
+def test_페이지_수를_요청값이_아니라_실제_응답으로_센다(monkeypatch):
+    """★ 서버는 numOfRows를 1000으로 줘도 **100행만** 준다.
+    요청값으로 페이지를 세면 '18페이지'인 줄 알고 174번 호출한다 —
+    '왜 40초나 걸리지'의 답을 못 찾은 이유가 이것이었다."""
+    calls: list[int] = []
+
+    def fake(op, params, *, service_key, rows, page):
+        calls.append(page)
+        return [{"i": page * 100 + n} for n in range(100)], 350  # 총 350행, 100행씩
+
+    monkeypatch.setattr(hub, "_call_page", fake)
+    out = hub.call_all("op", {}, page_size=1000)
+    assert len(out) == 350
+    assert sorted(calls) == [1, 2, 3, 4], f"페이지를 잘못 셌다: {sorted(calls)}"
+
+
+def test_429는_물러섰다_다시_시도한다(monkeypatch):
+    """한 번 막히면 사용자는 아예 못 쓴다. 재시도가 없으면 그대로 화면에 뜬다."""
+    import urllib.error
+
+    tries = {"n": 0}
+
+    def flaky(req, timeout=None):
+        tries["n"] += 1
+        if tries["n"] < 3:
+            raise urllib.error.HTTPError(req.full_url, 429, "Too Many", {}, None)
+
+        class R:
+            def read(self):
+                return b'{"response":{"body":{"totalCount":0,"items":""}}}'
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        return R()
+
+    monkeypatch.setattr(hub.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(hub.time, "sleep", lambda s: None)  # 테스트는 기다리지 않는다
+    raw = hub._get_with_retry("https://example.invalid/x", "op")
+    assert tries["n"] == 3
+    assert "totalCount" in raw
+
+
+def test_계속_429면_직접입력을_안내하며_멈춘다(monkeypatch):
+    import urllib.error
+
+    def always429(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 429, "Too Many", {}, None)
+
+    monkeypatch.setattr(hub.urllib.request, "urlopen", always429)
+    monkeypatch.setattr(hub.time, "sleep", lambda s: None)
+    with pytest.raises(hub.RateLimited) as exc:
+        hub._get_with_retry("https://example.invalid/x", "getBrHsprcInfo")
+    # 사용자가 다음에 뭘 해야 하는지가 메시지에 있어야 한다
+    assert "직접 입력" in str(exc.value)
+
+
+def test_진행률_콜백이_페이지마다_불린다(monkeypatch):
+    """40초짜리 조회에 진행 표시가 없으면 사용자는 멈춘 줄 안다."""
+    def fake(op, params, *, service_key, rows, page):
+        return [{"i": n} for n in range(100)], 500
+
+    monkeypatch.setattr(hub, "_call_page", fake)
+    seen: list[tuple[int, int]] = []
+    hub.call_all("op", {}, progress=lambda d, t: seen.append((d, t)))
+    assert len(seen) == 5
+    assert seen[-1] == (5, 5)

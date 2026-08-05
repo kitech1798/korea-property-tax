@@ -30,11 +30,15 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 BASE = "https://apis.data.go.kr/1613000/BldRgstHubService"
 USER_AGENT = "realestate-tax-consult/0.1"
@@ -153,9 +157,9 @@ class Building:
     """표제부 한 동.
 
     ★ 이 단계가 **비싼 조회를 피하는 관문**이다 (2026-08-04 실측).
-        표제부      940호 단지에서   10행  0.2초
-        전유공용면적 같은 단지에서  940호  27.1초
-        주택가격    같은 단지에서 17,309행 41.0초
+        표제부      940호 단지에서   10행   0.2초
+        전유공용면적 같은 단지에서  940호   27.1초 (동별 필터를 주면 2.7초)
+        주택가격    같은 단지에서 17,309행 10.9초 (174페이지를 동시에 받아서)
 
       "이 지번이 맞는가"와 "동이 몇 개인가"는 0.2초에 답할 수 있다.
       그걸 27초짜리 조회로 확인하면 후보 지번이 둘일 때 1분을 버린다.
@@ -217,13 +221,40 @@ def call(
     return _call_page(operation, params, service_key=service_key, rows=rows, page=page)[0]
 
 
+PAGE_SIZE = 100
+"""서버가 실제로 돌려주는 최대 행 수.
+
+⚠️ `numOfRows`를 1000이나 20000으로 보내도 **100행만 온다**(2026-08-05 실측).
+   예전 기본값이 1000이라 코드는 '18페이지'를 세고 있었지만 실제로는 174번을
+   호출하고 있었다. 페이지 수를 잘못 알면 '왜 40초나 걸리지'의 답을 못 찾는다.
+"""
+
+MAX_CONCURRENCY = 8
+"""동시 요청 수.
+
+이 API는 429(Too Many Requests)를 던진다. **간격 제한 없이** 18개를 동시에
+쏘았다가 차단당했고, 그 뒤 한동안 정상 조회까지 막혔다 — 한 번 막히면
+사용자가 아예 못 쓴다.
+
+174페이지 실측(압구정 미성, 17,309행):
+    순차        41.0초
+    동시 4개    23.8초
+    동시 8개    10.9초   ← 채택
+    동시 12개   12.2초   더 빨라지지 않는다(간격 제한이 바닥)
+
+8개에서 이미 `_MIN_INTERVAL_SEC`가 병목이므로 더 올릴 이유가 없다.
+빠른 것보다 **막히지 않는 것**이 중요하다.
+"""
+
+
 def call_all(
     operation: str,
     params: Mapping[str, Any],
     *,
     service_key: str | None = None,
-    page_size: int = 1000,
+    page_size: int = PAGE_SIZE,
     max_records: int = 50_000,
+    progress: "Callable[[int, int], None] | None" = None,
 ) -> list[dict[str, Any]]:
     """전 페이지를 훑는다.
 
@@ -232,18 +263,101 @@ def call_all(
       쌓인다. 그래서 각 오퍼레이션의 1페이지는 **서로 다른 호 집합**을 덮고,
       `mgmBldrgstPk` 교집합이 비어 채움률 0%가 나온다.
       실제로 압구정 한양1차(936호)에서 1페이지만 받으면 0%, 전수를 받으면 100%였다.
+
+    1페이지로 총건수를 확인한 뒤 나머지는 **동시에** 받는다. 페이지끼리 의존이 없어
+    순서대로 기다릴 이유가 없다. 다만 429를 맞으면 사용자가 아예 못 쓰게 되므로
+    동시 수를 낮게 잡고 호출 간 최소 간격을 지킨다.
+
+    `progress(done, total)`을 주면 페이지가 도착할 때마다 부른다 — 40초짜리 조회에
+    진행 표시가 없으면 사용자는 멈춘 줄 안다.
     """
-    out: list[dict[str, Any]] = []
-    page = 1
-    while True:
-        items, total = _call_page(
-            operation, params, service_key=service_key, rows=page_size, page=page
+    first, total = _call_page(
+        operation, params, service_key=service_key, rows=page_size, page=1
+    )
+    if not first:
+        return []
+
+    limit = min(total, max_records)
+    pages = -(-limit // len(first)) if first else 1
+    if progress:
+        progress(1, pages)
+    if pages <= 1:
+        return first[:limit]
+
+    results: dict[int, list[dict[str, Any]]] = {1: first}
+
+    def fetch(n: int) -> tuple[int, list[dict[str, Any]]]:
+        items, _ = _call_page(
+            operation, params, service_key=service_key, rows=page_size, page=n
         )
-        out.extend(items)
-        if not items or len(out) >= min(total, max_records):
-            break
-        page += 1
-    return out
+        return n, items
+
+    with ThreadPoolExecutor(max_workers=MAX_CONCURRENCY) as pool:
+        futures = [pool.submit(fetch, n) for n in range(2, pages + 1)]
+        for done, fut in enumerate(as_completed(futures), start=2):
+            n, items = fut.result()
+            results[n] = items
+            if progress:
+                progress(done, pages)
+
+    out: list[dict[str, Any]] = []
+    for n in sorted(results):
+        out.extend(results[n])
+    return out[:limit]
+
+
+class RateLimited(BuildingHubError):
+    """API가 429로 물러서라고 했다. 재시도해도 안 되면 여기까지 온다."""
+
+
+# 이 API는 **속도 제한이 있다**(HTTP 429). 2026-08-05에 실측 중 실제로 걸렸고,
+# 그 뒤 한동안 정상 조회까지 막혔다. 그래서 두 가지를 함께 건다:
+#   ① 429·5xx에는 물러섰다 다시(exponential backoff + Retry-After 존중)
+#   ② 연속 호출 사이에 최소 간격 — 재시도만 있으면 한도를 계속 두드린다
+_MIN_INTERVAL_SEC = 0.06
+_MAX_ATTEMPTS = 5
+_last_call_at = 0.0
+_throttle_lock = threading.Lock()
+
+
+def _pace() -> None:
+    """호출 간 최소 간격을 지킨다. 여러 스레드가 동시에 들어와도 한 줄로 세운다."""
+    global _last_call_at
+    with _throttle_lock:
+        wait = _MIN_INTERVAL_SEC - (time.monotonic() - _last_call_at)
+        if wait > 0:
+            time.sleep(wait)
+        _last_call_at = time.monotonic()
+
+
+def _get_with_retry(url: str, operation: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    delay = 0.8
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        _pace()
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code == 429 or 500 <= exc.code < 600
+            if not retryable or attempt == _MAX_ATTEMPTS:
+                if exc.code == 429:
+                    raise RateLimited(
+                        f"{operation}: 공공데이터포털이 요청 속도를 제한했습니다(429).\n"
+                        "  잠시 뒤 다시 시도해주세요. 그 사이에는 공시가격을 직접 입력하시면 "
+                        "계산은 그대로 됩니다."
+                    ) from exc
+                raise BuildingHubError(f"호출 실패: {operation}\n  {exc}") from exc
+            # 서버가 Retry-After를 주면 그 값을 존중한다 — 우리 추측보다 정확하다.
+            hinted = exc.headers.get("Retry-After") if exc.headers else None
+            time.sleep(float(hinted) if hinted and hinted.isdigit() else delay)
+            delay *= 2
+        except Exception as exc:
+            if attempt == _MAX_ATTEMPTS:
+                raise BuildingHubError(f"호출 실패: {operation}\n  {exc}") from exc
+            time.sleep(delay)
+            delay *= 2
+    raise BuildingHubError(f"호출 실패: {operation}")
 
 
 def _call_page(
@@ -262,13 +376,7 @@ def _call_page(
         **{k: v for k, v in params.items() if v not in (None, "")},
     }
     url = f"{BASE}/{operation}?" + urllib.parse.urlencode(query, encoding="utf-8")
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-    except Exception as exc:
-        raise BuildingHubError(f"호출 실패: {operation}\n  {exc}") from exc
+    raw = _get_with_retry(url, operation)
 
     stripped = raw.lstrip()
     if not stripped.startswith(("{", "[")):
@@ -475,12 +583,24 @@ def fetch_units(
     )
 
 
-def fetch_prices(key: ParcelKey, *, service_key: str | None = None) -> tuple[HousePrice, ...]:
-    """주택가격. 단지 전건을 받아야 한다 — 동·호 필터가 먹지 않고 서버가 1,000행에서
-    페이지 상한을 건다(page_size를 20,000으로 올려도 동일). 940호 단지에서 41초.
-    그래서 **사용자가 호를 고른 뒤에** 부르고, 결과는 캐시한다."""
+def fetch_prices(
+    key: ParcelKey,
+    *,
+    service_key: str | None = None,
+    progress: "Callable[[int, int], None] | None" = None,
+) -> tuple[HousePrice, ...]:
+    """주택가격. 단지 전건을 받아야 한다.
+
+    왜 전건인가 — 동·호 필터가 **먹지 않는다**(dongNm/hoNm를 줘도 전건이 온다).
+    그리고 서버가 한 페이지에 **100행**만 준다(numOfRows를 20,000으로 올려도 동일).
+    940호 단지는 19년 이력이 쌓여 17,309행 = 174페이지다.
+
+    그래서 **사용자가 호를 고른 뒤에** 부르고, 결과는 캐시하고, 페이지는 동시에 받는다.
+    """
     return parse_prices(
-        call_all("getBrHsprcInfo", key.as_params(), service_key=service_key)
+        call_all(
+            "getBrHsprcInfo", key.as_params(), service_key=service_key, progress=progress
+        )
     )
 
 
