@@ -5,9 +5,9 @@
 ★ 왜 단계를 쪼갰나 (2026-08-04 실측, 940호 단지)
       표제부       0.2초   ← 단지 확인, 동 목록
       전유부(동별) 2.7초   ← 그 동의 호 목록
-      주택가격    41.0초   ← 단지 전건. 필터가 안 먹고 서버가 1,000행 상한
+      주택가격    10.9초   ← 단지 전건(174페이지를 동시에). 원래 41초였다.
 
-  한 번에 다 부르면 첫 화면이 70초 멈춘다. 그래서 사용자가 실제로 필요해진
+  한 번에 다 부르면 첫 화면이 멈춘다. 그래서 사용자가 실제로 필요해진
   시점까지 비싼 조회를 미루고, 미룬 것은 캐시해 두 번 부르지 않는다.
 
 ★ 자동조회는 **참고값**이지 정본이 아니다
@@ -115,9 +115,13 @@ def _units(parcel: hub.ParcelKey, dong_nm: str) -> tuple[hub.Unit, ...]:
 
 
 @st.cache_data(ttl=DAY, show_spinner=False, max_entries=50)
-def _prices(parcel: hub.ParcelKey) -> tuple[hub.HousePrice, ...]:
-    """단지 전건. 41초짜리라 캐시가 핵심이다 — 같은 단지의 다음 호는 즉시 나온다."""
-    return hub.fetch_prices(parcel)
+def _prices(parcel: hub.ParcelKey, _progress=None) -> tuple[hub.HousePrice, ...]:
+    """단지 전건. 무거운 조회라 캐시가 핵심이다 — 같은 단지의 다음 호는 즉시 나온다.
+
+    `_progress`는 앞에 밑줄이 있어 캐시 키에서 제외된다(Streamlit 규약).
+    콜백까지 키에 들어가면 매번 다른 함수 객체라 캐시가 절대 맞지 않는다.
+    """
+    return hub.fetch_prices(parcel, progress=_progress)
 
 
 def price_of(
@@ -225,18 +229,31 @@ def picker(idx: int, house: dict, year: int) -> None:
         unit = units[hi]
 
         st.caption(
-            "다음 단계는 단지 전체의 공시가격 이력을 한 번 읽습니다(약 40초). "
-            "같은 단지의 다른 호는 그 뒤로 즉시 나옵니다."
+            "다음 단계는 단지 전체의 공시가격 이력을 한 번 읽습니다. "
+            "**같은 단지의 다른 호는 그 뒤로 즉시 나옵니다.**"
         )
         if not st.button("이 호의 공시가격 가져오기", key=f"adr_go{idx}", type="primary"):
             return
 
-        with st.spinner("공시가격을 가져오는 중… (단지 전체 이력, 약 40초)"):
-            try:
-                prices = _prices(probe.parcel)
-            except Exception as exc:
-                st.error(f"공시가격 조회에 실패했습니다. 직접 입력해주세요.\n\n{exc}")
-                return
+        bar = st.progress(0.0, text="공시가격을 가져오는 중…")
+
+        def tick(done: int, total: int) -> None:
+            # 진행 표시가 없으면 사용자는 멈춘 줄 안다. 남은 페이지를 그대로 보여준다.
+            bar.progress(min(done / max(total, 1), 1.0), text=f"공시가격 {done}/{total}")
+
+        try:
+            prices = _prices(probe.parcel, _progress=tick)
+        except hub.RateLimited as exc:
+            bar.empty()
+            st.warning(str(exc))
+            _apply_dong_only(idx, house, match)
+            return
+        except Exception as exc:
+            bar.empty()
+            st.error(f"공시가격 조회에 실패했습니다. 직접 입력해주세요.\n\n{exc}")
+            _apply_dong_only(idx, house, match)
+            return
+        bar.empty()
 
         found = price_of(prices, unit.mgm_pk, year)
         if found is None:
