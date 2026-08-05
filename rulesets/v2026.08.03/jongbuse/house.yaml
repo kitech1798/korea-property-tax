@@ -535,3 +535,47 @@ blocks:
     source: {kind: manual, note: "농어촌특별세법 §5①6 — 종합부동산세액의 100분의 20"}
     certainty: enacted
     value: "0.20"
+
+---
+rule_id: jongbuse.house.deferral
+unit: spec
+description: |
+  종합부동산세 납부유예(종부세법 §20의2).
+
+  ★ **이건 감면이 아니라 미루는 것이다.** 절감액으로 표시하면 거짓말이 된다.
+    허가가 취소되면 유예세액에 **이자상당가산액**이 붙어 함께 징수된다(§20의2⑤).
+    다만 유예 기간의 납부지연가산세는 부과하지 않는다(§20의2⑥).
+
+  집은 있는데 현금이 없는 고령 1주택자에게 실제로 필요한 제도다.
+  개편안이 보유세를 올리면서 이 제도의 쓸모가 커졌다.
+
+  요건 원문(2026-08-05 법제처 XML 확인, MST 280417 JO=002002)
+    1. 과세기준일 현재 **1세대 1주택자**(§10의2 공동명의 1주택자 포함)
+    2. 과세기준일 현재 **만 60세 이상**이거나 해당 주택을 **5년 이상 보유**
+    3. 소득 기준
+       가. 직전 과세기간 **총급여 7천만원 이하**(근로소득만 있는 자로 한정)
+       나. 직전 과세기간 **종합소득금액 6천만원 이하**(총급여 7천만원 이하인 자로 한정)
+    4. 해당 연도 주택분 종합부동산세액이 **100만원 초과**
+    + 납부기한 만료 **3일 전까지** 신청, 세액 상당의 **담보 제공**
+
+  ⚠️ 소득 기준은 사건 모델에 없다. 엔진은 나머지 셋만 판정하고 소득은 사용자에게 묻는다.
+     ⚠️ 이자상당가산액의 율은 시행령 소관이라 이 룰셋에 담지 않았다.
+blocks:
+  - id: deferral-2022
+    tracks: [current, reform]
+    effective_from: 2022-01-01
+    basis: {law: 종합부동산세법, article: "20-2", clause: "1", mst: "280417"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=002002&type=XML", fetched_at: 2026-08-05}
+    certainty: enacted
+    payload:
+      min_age: 60
+      min_holding_years: 5
+      min_tax: 1000000
+      income_salary_cap: 70000000
+      income_total_cap: 60000000
+      apply_days_before_due: 3
+      revoke_reasons_ko:
+        - "해당 주택을 타인에게 양도하거나 증여하는 경우"
+        - "사망하여 상속이 개시되는 경우"
+        - "1세대1주택자 요건을 충족하지 않게 되는 경우"
+        - "담보 보전 명령에 따르지 않는 경우"

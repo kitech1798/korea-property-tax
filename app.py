@@ -46,6 +46,8 @@ from realestate_tax.engine.regions import (
     YES,
     check_regulated,
 )
+from realestate_tax.engine.deferral import check_deferral
+from realestate_tax.engine.special_houses import assess as A_ASSESS
 from realestate_tax.engine.strategy import consult, sell_timing
 from realestate_tax.engine.trace import format_manwon
 from realestate_tax.engine.transfer_tax import (
@@ -556,6 +558,45 @@ with tab_holding:
     #   "배우자에게 증여하면 절세된다"는 널리 퍼져 있지만 1주택자에게는
     #   1세대1주택 세액공제(최대 80%)를 잃어 오히려 손해다.
     #   이걸 안 보여주면 사용자는 다른 데서 듣고 그대로 한다.
+    # ── 납부유예 ──────────────────────────────────────────────────────
+    # 절감이 아니라 **유예**라 절세 대안 목록에 넣지 않는다. 절감액 칸에 숫자가
+    # 들어가는 순간 사용자는 그만큼 안 내도 되는 줄 안다.
+    # 그래도 반드시 있어야 한다 — 집은 있는데 현금이 없는 고령 1주택자에게는
+    # 이게 유일한 현실적 답이고, 개편안이 보유세를 올리면서 쓸모가 커졌다.
+    main_result = compute_jongbuse(case, ME, rs, track=effective_track, options=opts)
+    assessment = A_ASSESS(case, ME, rs, track=effective_track)
+    defer = check_deferral(
+        case, ME, rs,
+        jongbuse_amount=main_result.net_tax.as_int(),
+        one_house=assessment.is_one_house,
+        holding_years=main_options().holding_years,
+        track=effective_track,
+    )
+    if defer.worth_showing:
+        st.markdown("## 세금을 미룰 수 있습니다 — 납부유예")
+        st.caption(
+            "**감면이 아니라 유예입니다.** 집을 팔거나 물려줄 때 유예된 세액을 "
+            "이자상당가산액과 함께 냅니다(종합부동산세법 §20의2⑤). "
+            "집은 있는데 낼 현금이 없을 때 쓰는 제도입니다."
+        )
+        with st.container(border=True):
+            st.markdown(f"**유예 가능액 {format_manwon(defer.deferrable)}**")
+            st.markdown("\n".join(f"- ✅ {m}" for m in defer.met_ko))
+            if defer.asks_ko:
+                st.markdown(
+                    "**확인이 필요한 요건**\n"
+                    + "\n".join(f"- {a}" for a in defer.asks_ko)
+                )
+            st.markdown(
+                "**신청** — 납부기한 만료 3일 전까지 관할세무서장에게 신청하고, "
+                "유예할 세액에 상당하는 담보를 제공해야 합니다(§20의2①)."
+            )
+            if defer.revoke_reasons_ko:
+                st.markdown(
+                    "**허가가 취소되는 경우**\n"
+                    + "\n".join(f"- {r}" for r in defer.revoke_reasons_ko)
+                )
+
     harmful = [s for s in con.strategies if s.saving < 0]
     if harmful:
         st.markdown("## 하지 않는 편이 나은 것")
