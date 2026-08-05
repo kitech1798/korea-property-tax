@@ -100,18 +100,37 @@ def test_개편안은_같은_1주택자를_거주여부로_가른다(rs: RuleSet
     assert resident.ref().certainty.legal is LegalStatus.BILL_PENDING
 
 
-def test_개편안_규칙은_시행_전_연도에_적용되지_않는다(rs: RuleSet):
-    """'26년에 개편안 트랙을 물어도 '27 시행 블록은 안 잡힌다.
-    '지금 계산하면 얼마'와 '개편되면 얼마'가 섞이지 않도록 하는 방어선."""
-    with pytest.raises(MissingRule, match="시행기간 밖"):
-        rs.resolve(
-            "test.basic_deduction",
-            on=date(2026, 6, 1),
-            track=Track.REFORM,
-            taxpayer="individual",
-            one_house=True,
-            resides=True,
-        )
+def test_시행_전_연도의_개편안은_현행_조문으로_답한다(rs: RuleSet):
+    """★ "개편안이 통과된다고 가정하면 2026년은 얼마?"의 답은
+    **"현행법과 같다"**이지 "계산할 수 없다"가 아니다.
+
+    개편안은 현행법을 통째로 갈아치우지 않고 조항별로 시행일을 갖는다.
+    시행일 전까지는 현행 조문이 그대로 적용된다 — 그게 시행일의 의미다.
+
+    예전에는 여기서 MissingRule을 던졌고, 화면이 "개편안 조항이 아직
+    시행되지 않습니다"라고만 말해 **계산을 거부하는 것처럼** 보였다."""
+    r = rs.resolve(
+        "test.basic_deduction",
+        on=date(2026, 6, 1),
+        track=Track.REFORM,
+        taxpayer="individual",
+        one_house=True,
+        resides=True,
+    )
+    assert r.value == 1_200_000_000, "2026년은 현행 12억"
+    assert r.block.id == "bd-current-1house"
+    assert r.fell_back_to_current is True
+
+    # 실제로 적용한 것은 현행 조문이다. 개편안 배지를 붙이면 거짓이 된다.
+    assert r.ref().certainty.legal is not LegalStatus.BILL_PENDING
+
+    # 2027년에는 개편안 블록이 잡힌다
+    r27 = rs.resolve(
+        "test.basic_deduction", on=date(2027, 6, 1), track=Track.REFORM,
+        taxpayer="individual", one_house=True, resides=True,
+    )
+    assert r27.value == 1_400_000_000
+    assert r27.fell_back_to_current is False
 
 
 def test_조건이_부족하면_조용히_통과하지_않고_실패한다(rs: RuleSet):
@@ -124,22 +143,25 @@ def test_조건이_부족하면_조용히_통과하지_않고_실패한다(rs: R
             taxpayer="individual",
             one_house=True,
         )
-    assert "조건 불일치" in str(exc.value)
+    assert "입력 없음" in str(exc.value)
+    # ⚠️ 시행일 폴백이 이 실패를 삼키면 안 된다. 삼키면 거주 여부를 모르는데
+    #    현행 12억을 골라주게 된다 — 폴백을 처음 넣었을 때 실제로 그렇게 됐다.
+    assert "resides" in str(exc.value)
 
 
 def test_실패_메시지가_탈락_사유를_전부_보여준다(rs: RuleSet):
     with pytest.raises(MissingRule) as exc:
         rs.resolve(
             "test.basic_deduction",
-            on=date(2026, 6, 1),
+            on=date(2027, 6, 1),
             track=Track.REFORM,
             taxpayer="individual",
             one_house=True,
-            resides=True,
         )
     msg = str(exc.value)
-    assert "bd-current-1house" in msg and "트랙 불일치" in msg
-    assert "bd-reform-1house-resident" in msg and "시행기간 밖" in msg
+    assert "bd-reform-1house-resident" in msg
+    assert "입력 없음" in msg and "resides" in msg
+    assert "bd-corporation" in msg and "조건 불일치" in msg
 
 
 def test_더_구체적인_블록이_이긴다(rs: RuleSet):

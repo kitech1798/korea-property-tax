@@ -83,12 +83,23 @@ class Selector:
         return len(self.constraints)
 
     def matches(self, ctx: Mapping[str, Any]) -> bool:
-        for key, want in self.constraints.items():
-            if key not in ctx:
-                return False
-            if not _satisfies(ctx[key], want):
-                return False
-        return True
+        return not self.missing_keys(ctx) and not self.mismatched_keys(ctx)
+
+    def missing_keys(self, ctx: Mapping[str, Any]) -> tuple[str, ...]:
+        """컨텍스트에 **아예 없는** 조건 키.
+
+        ★ '값이 달라서 안 맞음'과 '값을 안 알려줘서 못 맞춤'은 다른 사건이다.
+          전자는 "이 블록은 이 케이스가 아니다"이고, 후자는 "입력이 모자라다"이다.
+          resolver의 시행일 폴백이 후자를 삼키면 안 되므로 구분해서 돌려준다.
+        """
+        return tuple(k for k in self.constraints if k not in ctx)
+
+    def mismatched_keys(self, ctx: Mapping[str, Any]) -> tuple[str, ...]:
+        """값은 있는데 조건과 다른 키."""
+        return tuple(
+            k for k, want in self.constraints.items()
+            if k in ctx and not _satisfies(ctx[k], want)
+        )
 
     def describe_ko(self) -> str:
         if not self.constraints:

@@ -27,20 +27,70 @@ from realestate_tax.sources import resolve
 
 DAY = 60 * 60 * 24
 
-SETUP_GUIDE_KO = """
-자동조회를 쓰려면 무료 인증키 2개가 필요합니다. 둘 다 **즉시 발급**입니다.
+ISSUERS = {
+    "JUSO_CONFM_KEY": (
+        "도로명주소 검색",
+        "https://business.juso.go.kr",
+        "business.juso.go.kr → 주소정보 API 연계 → **도로명주소 검색 API**",
+    ),
+    "DATA_GO_KR_KEY": (
+        "건축물대장",
+        "https://www.data.go.kr/data/15134735/openapi.do",
+        "data.go.kr 15134735 → 활용신청(자동승인)",
+    ),
+}
 
-| 키 | 발급처 | 환경변수 |
-|---|---|---|
-| 도로명주소 검색 | [business.juso.go.kr](https://business.juso.go.kr) → 주소정보 API 연계 | `JUSO_CONFM_KEY` |
-| 건축물대장 | [data.go.kr 15134735](https://www.data.go.kr/data/15134735/openapi.do) | `DATA_GO_KR_KEY` |
+FALLBACK_KO = "키가 없어도 **공시가격을 직접 입력하면 계산은 그대로 됩니다.**"
 
-키가 없어도 **공시가격을 직접 입력하면 계산은 그대로 됩니다.**
-"""
+
+def is_cloud() -> bool:
+    """배포 환경인가.
+
+    ★ 안내 문구가 환경마다 달라야 한다. "인증키가 없습니다"만 띄우면,
+      **키를 이미 발급받은 사람**은 "다 받았는데 왜 안 되지?"에서 막힌다.
+      실제로 그렇게 막혔다 — 키는 개발자 PC의 환경변수에 있었고,
+      배포 서버는 다른 컴퓨터라 그 값을 볼 수 없었을 뿐이다.
+      **발급과 전달은 다른 일이다.**
+    """
+    return bool(
+        os.environ.get("STREAMLIT_RUNTIME_ENV")
+        or os.environ.get("HOSTNAME", "").startswith("streamlit")
+        or os.path.isdir("/mount/src")  # Streamlit Community Cloud의 소스 경로
+    )
+
+
+def setup_guide_ko(missing: list[str]) -> str:
+    rows = "\n".join(
+        f"| {ISSUERS[k][0]} | [{ISSUERS[k][2]}]({ISSUERS[k][1]}) | `{k}` |"
+        for k in missing
+    )
+    table = "| 키 | 발급처 | 이름 |\n|---|---|---|\n" + rows
+
+    if is_cloud():
+        where = (
+            "**이 앱은 배포 서버에서 돌고 있습니다.** 개인 PC의 환경변수는 여기까지 오지 않습니다.\n\n"
+            "`share.streamlit.io` → 이 앱 → **⋮ → Settings → Secrets** 에 아래 형식으로 넣고 "
+            "**Reboot app** 하세요.\n\n"
+            "```toml\n"
+            + "\n".join(f'{k} = "발급받은_키"' for k in missing)
+            + "\n```\n"
+        )
+    else:
+        where = (
+            "**이 앱은 지금 이 PC에서 돌고 있습니다.** 환경변수를 설정한 뒤 "
+            "**터미널을 새로 열어** 다시 실행하세요 — 이미 떠 있던 창은 예전 환경을 그대로 씁니다.\n\n"
+            "```powershell\n"
+            + "\n".join(
+                f'[Environment]::SetEnvironmentVariable("{k}", "발급받은_키", "User")'
+                for k in missing
+            )
+            + "\n```\n"
+        )
+    return f"{where}\n{table}\n\n{FALLBACK_KO}"
 
 
 def keys_ready() -> tuple[bool, list[str]]:
-    missing = [k for k in ("JUSO_CONFM_KEY", "DATA_GO_KR_KEY") if not os.environ.get(k)]
+    missing = [k for k in ISSUERS if not os.environ.get(k)]
     return (not missing, missing)
 
 
@@ -100,7 +150,7 @@ def picker(idx: int, house: dict, year: int) -> None:
     if not ready:
         with st.expander("주소로 공시가격 찾기 — 인증키가 없습니다"):
             st.caption(f"환경변수 미설정: {', '.join(missing)}")
-            st.markdown(SETUP_GUIDE_KO)
+            st.markdown(setup_guide_ko(missing))
         return
 
     with st.expander("주소로 공시가격 찾기", expanded=False):
