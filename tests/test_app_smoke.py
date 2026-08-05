@@ -301,3 +301,52 @@ def test_주택을_여러_번_지웠다_넣어도_예외가_없다():
     _btn(at, "주택 추가").click().run()
     assert_clean(at)
     assert len(at.session_state["houses"]) == 2
+
+
+# --------------------------------------------------------------------------
+# ③ 양도세 — 세액 명세가 화면에 있는가
+# --------------------------------------------------------------------------
+
+
+def test_양도세_명세가_화면에_나온다():
+    """예전에는 '권장 매도 시점' 카드만 있고 양도차익·공제·과세표준이
+    감사추적 트리 안에만 있었다. 자기 세금이 어떻게 나왔는지 보려면
+    트리를 펼쳐야 했다 — 계산기가 아니라 블랙박스다."""
+    at = run()
+    assert_clean(at)
+    text = " ".join(m.value for m in at.markdown)
+    for label in ("양도차익", "과세대상 양도차익", "장기보유특별공제", "과세표준",
+                  "양도소득세", "개인지방소득세", "총 부담세액"):
+        assert label in text, f"양도세 명세에 '{label}'이 없다"
+
+
+@pytest.mark.parametrize("year", [2026, 2027, 2028, 2029])
+def test_양도_연도를_바꿀_수_있고_예외가_없다(year):
+    """중과 한시완화가 '27~'28에만 있고 '26년 양도분에도 경과조치가 있다.
+    연도를 못 바꾸면 그 차이를 볼 수 없다 — 예전에는 2027년 고정이었다."""
+    at = AppTest.from_file("app.py", default_timeout=TIMEOUT).run()
+    at.selectbox(key="sell_year").set_value(year).run()
+    assert_clean(at)
+    assert at.session_state["sell_year"] == year
+
+
+def test_필요경비를_입력할_수_있다():
+    """빼지 않으면 양도차익이 실제보다 크게 잡혀 세금이 과대계상된다
+    (소득세법 §97①2)."""
+    at = AppTest.from_file("app.py", default_timeout=TIMEOUT).run()
+    assert any("필요경비" in n.label for n in at.number_input)
+    at.number_input(key="sell_expense").set_value(5000).run()
+    assert_clean(at)
+
+
+def test_양도차익이_0이어도_화면이_비지_않는다():
+    """예전에는 '양도가액을 크게 설정해주세요'만 뜨고 아무것도 안 나왔다.
+    차익이 없어도 양도세는 신고 대상이고(소득세법 §110), 손실은 통산 대상이다."""
+    at = AppTest.from_file("app.py", default_timeout=TIMEOUT).run()
+    at.number_input(key="sell_price").set_value(10.0).run()
+    at.number_input(key="buy_price").set_value(20.0).run()
+    assert_clean(at)
+    text = " ".join(m.value for m in at.markdown)
+    assert "양도차익이 없습니다" in text
+    assert "신고 대상" in text
+    assert "총 부담세액" in text, "차익이 없어도 명세는 보여야 한다"

@@ -475,3 +475,39 @@ def test_3주택_정부예시는_합산방식이고_엔진은_법대로_물건�
     )
     # 물건별이 합산보다 싸다 — 누진세율이 물건마다 아래 구간부터 다시 시작하기 때문
     assert engine_total < government_total
+
+
+def test_compute_property_tax는_물건_전체_세액이다_지분_안분이_아니다(rs: RuleSet):
+    """★ `owner_id`는 **1세대1주택 판정용**이지 '그 사람 몫'을 뜻하지 않는다.
+
+    이 이름을 '내 지분 세액'으로 오해해서 예전에 지분 소유자에게 물건 전체
+    재산세를 잡는 버그가 났다. 안분은 `compute_jongbuse`가 한다.
+    계약을 테스트로 못 박아 다음에 또 헷갈리지 않게 한다."""
+    from fractions import Fraction as F
+
+    from realestate_tax.engine.jongbuse import JongbuseOptions, compute_jongbuse
+
+    hh = HouseholdId("hh")
+    me, sp = PersonId("me"), PersonId("sp")
+    a = Person(id=me, household_id=hh, spouse_id=sp, birth_date=date(1960, 1, 1))
+    b = Person(id=sp, household_id=hh, spouse_id=me, birth_date=date(1962, 1, 1))
+    prop = Property(
+        id=PropertyId("h0"), kind=PropertyKind.APARTMENT, legal_dong_code=SEOUL,
+        published_prices=(PriceFact(2026, 1_500_000_000),),
+    )
+    case = TaxCase(
+        year=2026, persons=(a, b),
+        households=(Household(id=hh, member_ids=(me, sp)),),
+        properties=(prop,),
+        ownerships=(
+            Ownership(me, prop.id, share=F(1, 3)),
+            Ownership(sp, prop.id, share=F(2, 3)),
+        ),
+    )
+    whole = compute_property_tax(case, PropertyId("h0"), rs, owner_id=me).total.as_int()
+    mine = compute_jongbuse(
+        case, me, rs, options=JongbuseOptions(holding_years=10)
+    ).property_tax_total.as_int()
+
+    assert mine == whole // 3, "종부세 쪽에서 지분 안분이 안 됐다"
+    assert whole != mine, "compute_property_tax가 지분을 반영하면 계약이 바뀐 것이다"
