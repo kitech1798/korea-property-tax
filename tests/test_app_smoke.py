@@ -350,3 +350,31 @@ def test_양도차익이_0이어도_화면이_비지_않는다():
     assert "양도차익이 없습니다" in text
     assert "신고 대상" in text
     assert "총 부담세액" in text, "차익이 없어도 명세는 보여야 한다"
+
+
+def test_부담부증여_화면에_증여세_경계가_명시된다():
+    """★ 증여세를 빼놓고 '이만큼이면 유리하다'고 말하면 조언이 아니라 함정이다.
+    이 서비스는 양도소득세만 계산하므로 그 경계를 화면이 반드시 말해야 한다."""
+    at = run()
+    assert_clean(at)
+    text = " ".join(m.value for m in at.markdown) + " ".join(c.value for c in at.caption)
+    assert "부담부증여" in text
+    assert "증여세" in text
+    assert "두 세목을 합쳐야" in text
+    assert "양도로 보는 가액" in text
+
+
+def test_채무가_0이면_부담부증여가_아니라고_말한다():
+    at = AppTest.from_file("app.py", default_timeout=TIMEOUT).run()
+    at.number_input(key="gift_debt").set_value(0.0).run()
+    assert_clean(at)
+    text = " ".join(m.value for m in at.markdown)
+    assert "채무가 없으면 부담부증여가 아닙니다" in text
+
+
+def test_채무가_재산보다_크면_막고_안내한다():
+    at = AppTest.from_file("app.py", default_timeout=TIMEOUT).run()
+    at.number_input(key="gift_value").set_value(10.0).run()
+    at.number_input(key="gift_debt").set_value(20.0).run()
+    assert_clean(at)
+    assert "채무가 재산보다 큽니다" in " ".join(m.value for m in at.markdown)

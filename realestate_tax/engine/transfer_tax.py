@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from fractions import Fraction
 from typing import Any, Mapping
@@ -96,6 +96,176 @@ class TransferTaxResult:
     local_income_tax: Value
     total: Value
     trace: TraceNode
+
+
+@dataclass(frozen=True, slots=True)
+class BurdenGift:
+    """부담부증여 — 채무를 함께 넘기는 증여.
+
+    ★ 한 사건이 두 세목으로 쪼개진다(소득세법 §88① 후단).
+        "부담부증여 시 수증자가 부담하는 **채무액에 해당하는 부분은 양도로 보며**"
+
+      채무액 부분 → **증여자**가 양도소득세
+      나머지 부분 → **수증자**가 증여세
+
+    ⚠️ 이 엔진은 **양도소득세만** 계산한다. 증여세는 상속세및증여세법 소관이라
+       범위 밖이고, 증여세를 빼놓고 "이만큼이면 유리하다"고 말하면 함정이 된다.
+       화면은 반드시 그 사실을 밝혀야 한다.
+
+    안분 산식 (소득세법 시행령 §159①, 2026-08-05 조문 원문 확인):
+        취득가액 = A × 채무액 ÷ 증여가액   A: 법 §97①1에 따른 가액
+        양도가액 = A × 채무액 ÷ 증여가액   A: 상증세법 §60~66에 따라 평가한 가액
+
+      ⚠️ 법제처 API는 이 계산식을 **이미지로** 준다(JSON·HTML 모두).
+         XML(`type=XML`)로 받아야 텍스트가 나온다.
+    """
+
+    property_id: PropertyId
+    person_id: PersonId
+    gift_date: date
+    appraised_value: Won
+    """상증세법 §60~66에 따라 평가한 가액. 산식의 A."""
+    gift_value: Won
+    """증여가액. 산식의 C. 보통 평가액과 같지만 조문이 별개 항목으로 쓴다."""
+    debt_assumed: Won
+    """수증자가 인수하는 채무액. 산식의 B — 전세보증금·근저당 등."""
+    acquisition_price: Won
+    """증여자가 실제로 취득할 때 낸 금액(안분 전)."""
+    necessary_expense: Won = 0
+    holding_years: int | None = None
+    residence_years: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.gift_value <= 0:
+            raise ValueError("증여가액은 0보다 커야 한다")
+        if self.debt_assumed < 0:
+            raise ValueError("채무액은 음수일 수 없다")
+        if self.debt_assumed > self.gift_value:
+            raise ValueError(
+                f"채무액({self.debt_assumed:,})이 증여가액({self.gift_value:,})을 넘는다. "
+                "채무가 재산보다 크면 부담부증여가 아니다."
+            )
+
+    @property
+    def transfer_ratio(self) -> Fraction:
+        """양도로 보는 비율 = 채무액 ÷ 증여가액."""
+        return Fraction(self.debt_assumed, self.gift_value)
+
+    @property
+    def is_transfer(self) -> bool:
+        """채무가 없으면 순수 증여라 양도소득세가 없다."""
+        return self.debt_assumed > 0
+
+    @property
+    def gift_portion(self) -> Won:
+        """증여세 대상 금액. **이 엔진은 계산하지 않는다** — 화면 안내용."""
+        return max(0, self.gift_value - self.debt_assumed)
+
+    def to_transfer_event(self) -> TransferEvent:
+        """양도로 보는 부분만 떼어낸 양도 사건."""
+        r = self.transfer_ratio
+        return TransferEvent(
+            property_id=self.property_id,
+            person_id=self.person_id,
+            transfer_date=self.gift_date,
+            transfer_price=int(self.appraised_value * r),
+            acquisition_price=int(self.acquisition_price * r),
+            # 필요경비도 같은 비율로 안분한다. §159①은 취득가액·양도가액만 적지만,
+            # 안분하지 않으면 양도로 보는 부분에 전체 경비를 떠넘기게 된다.
+            necessary_expense=int(self.necessary_expense * r),
+            holding_years=self.holding_years,
+            residence_years=self.residence_years,
+        )
+
+
+def compute_burden_gift(
+    case: TaxCase,
+    gift: BurdenGift,
+    ruleset: RuleSet,
+    *,
+    track: Track = Track.CURRENT,
+) -> TransferTaxResult:
+    """부담부증여의 **양도소득세**를 계산한다. 증여세는 계산하지 않는다.
+
+    안분 사실을 감사추적 맨 앞에 남긴다 — 사용자가 "왜 양도가액이 증여가액보다
+    작지?"에서 막히지 않으려면 쪼갠 근거가 보여야 한다.
+    """
+    prop = case.find_property(gift.property_id)
+    subject = SubjectRef(
+        SubjectType.PROPERTY, str(prop.id), prop.display_name or str(prop.id)
+    )
+    ratio = gift.transfer_ratio
+    event = gift.to_transfer_event()
+
+    split = node(
+        "tr.01.burden_gift_split",
+        "부담부증여 안분",
+        Value.money(event.transfer_price, label="양도로 보는 가액"),
+        subject=subject,
+        formula="양도가액 = 평가액 × (채무액 ÷ 증여가액)",
+        substitution=(
+            f"{gift.appraised_value:,} × ({gift.debt_assumed:,} ÷ {gift.gift_value:,})"
+            f" = {event.transfer_price:,}"
+            f"  ·  취득가액 {gift.acquisition_price:,} × {ratio} = {event.acquisition_price:,}"
+        ),
+        branch=BranchRecord(
+            condition_ko="양도로 보는 부분",
+            taken=f"{float(ratio) * 100:.1f}%",
+            detail_ko=f"채무 {gift.debt_assumed:,}원 / 증여가액 {gift.gift_value:,}원",
+        ),
+        note_ko=(
+            "채무액에 해당하는 부분만 양도로 봅니다(소득세법 §88① 후단, 시행령 §159①). "
+            f"나머지 {gift.gift_portion:,}원은 **수증자가 증여세**를 냅니다 — "
+            "이 계산에는 증여세가 포함되어 있지 않습니다. "
+            "부담부증여의 유불리는 두 세목을 합쳐야 판단할 수 있습니다."
+        ),
+    )
+
+    result = compute_transfer_tax(case, event, ruleset, track=track)
+
+    # ★ 해석이 갈리는 유일한 지점을 드러낸다.
+    #   고가주택(12억) 판정을 **안분 후 양도가액**으로 하느냐 **주택 전체 평가액**으로
+    #   하느냐에 따라 비과세가 통째로 뒤집힌다. 조문 문언은 안분 후를 가리킨다 —
+    #   시행령 §160의 고가주택 안분식이 "양도가액"을 쓰고, §159①이 부담부증여의
+    #   양도가액을 안분액으로 정의하기 때문이다.
+    #   그러나 예규로 달리 볼 여지가 있고, 우리는 그 예규를 확인하지 못했다.
+    #   **두 해석의 답이 갈리는 경우에만** 판정 불가로 표시한다 —
+    #   답이 같은 지점에서까지 불확실을 뿌리면 나머지 경고까지 무시된다.
+    limit = ruleset.resolve(
+        f"{T}.one_house_exempt_limit", on=gift.gift_date, track=track
+    ).block.as_int()
+    diverges = gift.appraised_value > limit >= event.transfer_price
+
+    trace = replace(
+        result.trace,
+        label_ko=f"부담부증여 양도소득세 — {prop.display_name or prop.id} ({gift.gift_date})",
+        children=(split,) + result.trace.children,
+    )
+    if diverges:
+        trace = replace(
+            trace,
+            output=replace(
+                trace.output,
+                certainty=trace.output.certainty
+                & Certainty(determination=DeterminationQuality.UNDECIDABLE),
+            ),
+            alternatives_not_taken=trace.alternatives_not_taken
+            + (
+                Alternative(
+                    key="burden_gift_high_value_basis",
+                    label_ko=f"고가주택({limit:,}원) 판정 기준",
+                    reason_ko=(
+                        f"안분 후 양도가액 {event.transfer_price:,}원은 기준 이하지만 "
+                        f"주택 전체 평가액은 {gift.appraised_value:,}원입니다. "
+                        "조문 문언대로 안분 후 금액으로 판정했으나, 전체 가액을 기준으로 "
+                        "보는 해석이면 비과세가 배제되어 세액이 크게 달라집니다. "
+                        "**세무서 확인이 필요한 구간입니다.**"
+                    ),
+                    actionable=True,
+                ),
+            ),
+        )
+    return replace(result, trace=trace)
 
 
 def compute_transfer_tax(
