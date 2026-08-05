@@ -13,6 +13,7 @@ import pytest
 
 pytest.importorskip("streamlit.testing.v1")
 
+import streamlit as st  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 TIMEOUT = 60
@@ -174,9 +175,15 @@ def test_면책_문구가_항상_노출된다():
 
 
 def test_인증키가_없어도_화면이_그려지고_직접입력이_살아_있다(monkeypatch):
-    """자동조회는 편의지 관문이 아니다. 키가 없다고 계산을 막으면 안 된다."""
+    """자동조회는 편의지 관문이 아니다. 키가 없다고 계산을 막으면 안 된다.
+
+    ★ 환경변수만 지우면 '키 없음'이 되지 않는다(2026-08-05). 앱은 `st.secrets`도
+      읽으므로, 개발자가 로컬에 `.streamlit/secrets.toml`을 두는 순간 이 테스트가
+      **조용히 반대 상황을 검사**하게 된다. 키 공급원을 **전부** 막아야 한다.
+    """
     monkeypatch.delenv("JUSO_CONFM_KEY", raising=False)
     monkeypatch.delenv("DATA_GO_KR_KEY", raising=False)
+    monkeypatch.setattr(st, "secrets", {}, raising=False)
     at = run()
     assert_clean(at)
     assert any("공시가격" in i.label for i in at.text_input)
