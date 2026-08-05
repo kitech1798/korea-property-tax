@@ -365,7 +365,9 @@ def compute_transfer_tax(
     #   그래서 여기서는 **제외 없이** 세대 주택 수를 센다. 소득세법 고유 특례는
     #   아직 구현하지 않았으므로, 해당 가능성이 있으면 조용히 넘기지 않고 드러낸다.
     assessment = assess(case, event.person_id, ruleset, track=track, on=on)
-    counted, count_note = _transfer_house_count(case, event.person_id, on)
+    counted, applied_special, count_note = _transfer_house_count(
+        case, event.person_id, event.property_id, on, ruleset, track
+    )
     house_count = len(counted)
     one_house = house_count == 1
     children.append(
@@ -375,10 +377,17 @@ def compute_transfer_tax(
             Value.flag(one_house, label="1세대1주택"),
             subject=subject,
             formula="세대 전원이 소유한 주택 수 (소득세법 §89①3호)",
-            substitution=f"세대 주택 {house_count}채: {', '.join(str(p) for p in counted)}",
+            substitution=(
+                f"세대 주택 {house_count}채: {', '.join(str(p) for p in counted)}"
+                + (f" → {applied_special}" if applied_special else "")
+            ),
             branch=BranchRecord(
                 condition_ko="1세대1주택 해당 여부",
-                taken="1세대1주택" if one_house else f"{house_count}주택",
+                taken=(
+                    "1세대1주택 (시행령 §155① 일시적 2주택 특례)"
+                    if applied_special
+                    else ("1세대1주택" if one_house else f"{house_count}주택")
+                ),
             ),
             note_ko=(
                 "종합부동산세의 주택 수 특례(지방 저가주택·합산배제 임대주택 등)는 "
@@ -543,47 +552,94 @@ def compute_transfer_tax(
 
 
 def _transfer_house_count(
-    case: TaxCase, person_id: PersonId, on: date
-) -> tuple[tuple[PropertyId, ...], str]:
+    case: TaxCase,
+    person_id: PersonId,
+    property_id: PropertyId,
+    on: date,
+    ruleset: RuleSet,
+    track: Track,
+) -> tuple[tuple[PropertyId, ...], str, str]:
     """양도소득세용 1세대 주택 수. **종부세 특례를 쓰지 않는다.**
 
     소득세법 §89①3호의 '1세대 1주택'은 세대 전원이 소유한 주택을 센다.
-    제외 특례는 시행령 §155가 따로 정하는데(일시적 2주택, 상속주택, 동거봉양·혼인
-    합가, 농어촌주택 등) 요건이 종합부동산세법과 다르다. 아직 구현하지 않았으므로
-    **제외하지 않고 세고, 해당 가능성이 있으면 말한다.**
+    제외 특례는 시행령 §155가 따로 정하며 요건이 종합부동산세법과 다르다
+    (SIM-07, 2026-08-05: 종부령 §4의2③ 지방 저가주택 제외를 그대로 써서
+     2주택자의 양도차익 5.4억이 전액 비과세로 나갔다 — 실측 0원 → 1.7억원).
 
-    유리한 쪽으로 자동 가정하지 않는다는 원칙 그대로다 — 다만 방향이 반대다.
-    여기서 유리한 가정은 '주택 수를 줄이는 것'이고, 그건 비과세를 잘못 내주는 길이다.
+    적용 원칙 — **방향이 다르면 기준도 다르다.**
+      주택 수를 줄이는 특례는 세액을 **낮춘다.** 확인하지 못한 채 적용하면
+      과소신고가 되고 가산세가 붙는다. 그래서 **사실만으로 전부 판정되는 특례만
+      적용하고**, 하나라도 확인이 필요하면 적용하지 않고 안내한다.
+
+    돌려주는 것: (센 주택, 적용한 특례 설명, 확인이 필요한 특례 안내)
     """
     members = set(case.household_member_ids(person_id))
-    owned: dict[PropertyId, None] = {}
+    owned: dict[PropertyId, list] = {}
     for o in case.ownerships:
         if o.person_id in members and case.find_property(o.property_id).is_house:
-            owned.setdefault(o.property_id, None)
+            owned.setdefault(o.property_id, []).append(o)
 
     counted = tuple(owned)
     if len(counted) <= 1:
-        return counted, ""
+        return counted, "", ""
 
-    # 소득세법 시행령 §155의 특례에 해당할 만한 단서가 있으면 알려준다.
+    payload = _payload_of(ruleset, f"{T}.house_count_specials", on, track)
+
+    # ── §155① 일시적 2주택 — 취득일만으로 전부 판정된다 ──────────────
+    applied = ""
+    if payload and len(counted) == 2 and property_id in owned:
+        spec = payload.get("temporary_two") or {}
+        firsts = {
+            pid: min((o.acquired_on for o in rows if o.acquired_on), default=None)
+            for pid, rows in owned.items()
+        }
+        if all(firsts.values()):
+            old_id, new_id = sorted(firsts, key=lambda p: firsts[p])
+            gap_years = periods.full_years(firsts[old_id], firsts[new_id])
+            sell_years = periods.full_years(firsts[new_id], on)
+            min_gap = int(spec.get("min_years_before_new", 1))
+            max_sell = int(spec.get("max_years_to_sell_old", 3))
+            # 양도하는 것이 **종전주택**이어야 한다. 신규주택을 팔면 특례가 아니다.
+            if property_id == old_id and gap_years >= min_gap and sell_years < max_sell:
+                applied = (
+                    f"일시적 2주택(§155①) — 종전주택 취득 {firsts[old_id]} → "
+                    f"{gap_years}년 후 신규 취득 {firsts[new_id]} → "
+                    f"{sell_years}년 만에 종전주택 양도 (요건 {min_gap}년 이상 · {max_sell}년 이내)"
+                )
+                return (property_id,), applied, ""
+
+    # ── 확인이 필요한 특례는 적용하지 않고 알린다 ────────────────────
     hints: list[str] = []
-    recent = [
-        o for o in case.ownerships
-        if o.person_id in members and o.property_id in owned
-        and o.acquired_on is not None and (on - o.acquired_on).days < 3 * 365
-    ]
-    if recent:
-        hints.append("최근 3년 내 취득한 주택이 있어 일시적 2주택(시행령 §155①)에 해당할 수 있습니다")
     if any(
         o.cause is AcquisitionCause.INHERITANCE
-        for o in case.ownerships
-        if o.person_id in members and o.property_id in owned
+        for rows in owned.values() for o in rows
     ):
-        hints.append("상속받은 주택이 있어 상속주택 특례(시행령 §155②)에 해당할 수 있습니다")
+        hints.append(
+            "상속받은 주택이 있습니다. **일반주택**을 양도하는 경우 상속주택은 주택 수에서 "
+            "빠집니다(§155②). 다만 상속개시 당시 피상속인과 동일세대였는지에 따라 달라져 "
+            "엔진이 판정하지 않았습니다"
+        )
+    if len(counted) == 2 and not applied:
+        hints.append(
+            "2주택입니다. 일시적 2주택 요건(§155① 종전주택 취득 1년 후 신규 취득 · "
+            "신규 취득 3년 이내 종전주택 양도)을 다시 확인해보세요"
+        )
     if len(members) > 1:
-        hints.append("동거봉양·혼인으로 합가한 세대라면 합가 특례(시행령 §155④⑤)에 해당할 수 있습니다")
+        years = (payload or {}).get("cohabitation_years", 10)
+        hints.append(
+            f"동거봉양 합가(§155④)나 혼인(§155⑤)으로 2주택이 됐다면 합친 날부터 "
+            f"{years}년 이내 먼저 양도하는 주택은 1세대1주택으로 봅니다. "
+            "합가일·혼인일을 입력받지 않아 판정하지 않았습니다"
+        )
 
-    return counted, " / ".join(hints)
+    return counted, applied, " / ".join(hints)
+
+
+def _payload_of(
+    ruleset: RuleSet, rule_id: str, on: date, track: Track
+) -> Mapping[str, Any] | None:
+    res = ruleset.resolve_or_none(rule_id, on=on, track=track)
+    return res.block.payload if res is not None else None
 
 
 def _exemption_eligible(
