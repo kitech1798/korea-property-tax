@@ -194,6 +194,44 @@ def alternatives(items: Sequence[Alternative], title: str = "적용되지 않은
                 st.markdown(f"- **{esc(alt.label_ko)}** — {esc(body)}")
 
 
+_ADVISORY_ICON = {"opportunity": "💡", "caution": "⚠️", "fact": "📌"}
+_ADVISORY_LABEL = {"opportunity": "기회", "caution": "주의", "fact": "알아둘 것"}
+
+
+def advisories(items: Sequence, empty_hint: str = "") -> None:
+    """상담 지식. **근거 조문과 부작용을 접지 않고 함께 편다.**
+
+    조언만 크게 보여주고 부작용을 접어두면 사용자는 부작용을 안 읽는다.
+    "부부공동명의로 바꾸세요"만 보고 증여세를 모르면 조언이 아니라 함정이다.
+    """
+    if not items:
+        if empty_hint:
+            st.caption(empty_hint)
+        return
+
+    order = {"caution": 0, "opportunity": 1, "fact": 2}
+    for r in sorted(items, key=lambda a: order.get(str(a.advisory.severity), 9)):
+        sev = str(r.advisory.severity)
+        with st.container(border=True):
+            st.markdown(
+                f"**{_ADVISORY_ICON.get(sev, '·')} {esc(r.title_ko)}**"
+                f"　<span class='rt-badge rt-badge--"
+                f"{'warn' if sev == 'caution' else 'muted'}'>"
+                f"{_ADVISORY_LABEL.get(sev, sev)}</span>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(r.fact_ko)
+            st.markdown(f"**어떻게 하면 되나**\n\n{r.advice_ko}")
+            if r.advisory.caveats_ko:
+                st.markdown(
+                    "**놓치면 손해 보는 것**\n"
+                    + "\n".join(f"- {c}" for c in r.advisory.caveats_ko)
+                )
+            if r.advisory.uncertainty_ko:
+                note("확실하지 않은 부분", r.advisory.uncertainty_ko, "warn")
+            st.caption("근거 · " + " / ".join(r.advisory.basis))
+
+
 def table(headers: Sequence[str], rows: Sequence[Sequence[str]], best_row: int | None = None) -> None:
     """표. 넓은 표는 자체 스크롤 — 페이지 본문이 가로로 밀리면 안 된다."""
     head = "".join(f"<th>{esc(h)}</th>" for h in headers)

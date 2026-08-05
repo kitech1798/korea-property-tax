@@ -595,3 +595,54 @@ def test_법인은_1세대1주택자가_될_수_없다(rs: RuleSet):
     for kind in (PersonType.CORPORATION, PersonType.CORPORATION_PROGRESSIVE):
         r = run(rs, corp_case(kind))
         assert r.trace.find("jb.06.basic_deduction").output.as_int() != 1_200_000_000
+
+
+# --------------------------------------------------------------------------
+# ★ 거주 여부는 ResidenceSpell에서도 나온다 (2026-08-04 발견)
+#   '모르면 보수적으로'와 '알아도 무시'는 다른 것이다.
+# --------------------------------------------------------------------------
+
+
+def test_거주_이력을_입력하면_옵션_없이도_거주로_본다(rs: RuleSet):
+    """도메인이 ResidenceSpell을 1급 엔티티로 두는데 엔진이 읽지 않아,
+    거주 이력을 넣어도 옵션을 따로 주지 않으면 비거주로 계산됐다.
+    기본공제 14억 vs 9억 — 5억이 갈리는 자리다."""
+    case = one_house_case(year=2027, price=3_000_000_000, resides_since=date(2015, 1, 1))
+    r = run(rs, case, track=Track.REFORM, options=JongbuseOptions(residence_years=12))
+    assert r.trace.find("jb.06.basic_deduction").output.as_int() == 1_400_000_000
+    assert "거주 이력" in r.trace.find("jb.06.basic_deduction").branch.taken
+
+
+def test_거주_이력이_없으면_유리한_쪽으로_가정하지_않는다(rs: RuleSet):
+    case = one_house_case(year=2027, price=3_000_000_000)
+    r = run(rs, case, track=Track.REFORM, options=JongbuseOptions(holding_years=12))
+    n = r.trace.find("jb.06.basic_deduction")
+    assert n.output.as_int() == 900_000_000
+    assert "미입력" in n.branch.taken
+
+
+def test_입력값이_거주_이력보다_우선한다(rs: RuleSet):
+    """사용자가 명시적으로 아니라고 하면 그게 맞다. 이력은 보조 근거다."""
+    case = one_house_case(year=2027, price=3_000_000_000, resides_since=date(2015, 1, 1))
+    r = run(
+        rs, case, track=Track.REFORM,
+        options=JongbuseOptions(residence_years=12, resides_in_main_house=False),
+    )
+    assert r.trace.find("jb.06.basic_deduction").output.as_int() == 900_000_000
+    assert "입력값" in r.trace.find("jb.06.basic_deduction").branch.taken
+
+
+def test_과세기준일에_걸치지_않는_거주는_거주가_아니다(rs: RuleSet):
+    """6월 1일 이후에 이사 왔으면 그해에는 비거주다. 왜인지도 남긴다."""
+    from realestate_tax.domain import ResidenceSpell as RS
+
+    case = one_house_case(year=2027, price=3_000_000_000)
+    case = TaxCase(
+        year=case.year, persons=case.persons, households=case.households,
+        properties=case.properties, ownerships=case.ownerships,
+        residences=(RS(PersonId("p0"), PropertyId("h0"), start=date(2027, 8, 1)),),
+    )
+    r = run(rs, case, track=Track.REFORM, options=JongbuseOptions(holding_years=12))
+    n = r.trace.find("jb.06.basic_deduction")
+    assert n.output.as_int() == 900_000_000
+    assert "과세기준일에 걸치지 않음" in n.branch.taken

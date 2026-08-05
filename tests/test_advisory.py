@@ -299,3 +299,78 @@ def test_지식베이스가_없어도_상담이_동작한다(rs: RuleSet):
     result = compute_jongbuse(case, ME, rs, options=JongbuseOptions(holding_years=10))
     out = advise(case, ME, rs, result=result, root="없는경로_xyz")
     assert out == ()
+
+
+# --------------------------------------------------------------------------
+# ★ 판정 결과는 값으로 받는다, 화면 문구를 파싱하지 않는다 (2026-08-04)
+# --------------------------------------------------------------------------
+
+
+def joint_case(year: int = 2027) -> TaxCase:
+    """부부공동명의 1/2 · 본인이 그 집에 거주."""
+    from realestate_tax.domain import ResidenceSpell
+
+    hh = HouseholdId("hh")
+    a = Person(id=ME, household_id=hh, spouse_id=SPOUSE, birth_date=date(1955, 3, 1))
+    b = Person(id=SPOUSE, household_id=hh, spouse_id=ME, birth_date=date(1958, 5, 1))
+    p = Property(
+        id=PropertyId("h0"), kind=PropertyKind.APARTMENT, legal_dong_code=SEOUL,
+        published_prices=(PriceFact(year, 2_000_000_000),),
+    )
+    return TaxCase(
+        year=year, persons=(a, b),
+        households=(Household(id=hh, member_ids=(ME, SPOUSE)),),
+        properties=(p,),
+        ownerships=(
+            Ownership(ME, p.id, share=Fraction(1, 2)),
+            Ownership(SPOUSE, p.id, share=Fraction(1, 2)),
+        ),
+        residences=(ResidenceSpell(ME, p.id, start=date(2015, 1, 1)),),
+    )
+
+
+def test_부부공동명의_거주자에게_비거주_조언이_뜨지_않는다(rs: RuleSet):
+    """상담 계층이 기본공제 노드의 화면 문구("… · 거주")를 파싱해 거주 여부를
+    되찾고 있었다. 그 문구는 '개편안 + 1세대1주택'일 때만 붙어서,
+    부부공동명의에서는 조용히 False가 되고 **틀린 조언이 나갔다.**
+
+    표시용 문자열은 계산 결과의 저장소가 아니다."""
+    case = joint_case()
+    r = compute_jongbuse(
+        case, ME, rs, track=Track.REFORM,
+        options=JongbuseOptions(holding_years=12, residence_years=12),
+    )
+    assert r.resides is True, "엔진이 거주로 판정했는지부터"
+
+    ctx = build_context(case, ME, rs, track=Track.REFORM, result=r)
+    assert ctx["resides"] is True
+
+    picked = {a.id for a in advise(case, ME, rs, track=Track.REFORM, result=r)}
+    assert "adv.residence.nonresident_one_house_reform" not in picked
+
+
+def test_거주_판정은_결과에_값으로_실린다(rs: RuleSet):
+    """문구가 아니라 값. 사유도 함께 온다."""
+    r = compute_jongbuse(
+        joint_case(), ME, rs, track=Track.REFORM,
+        options=JongbuseOptions(holding_years=12),
+    )
+    assert r.resides is True
+    assert r.resides_reason_ko == "거주 이력"
+
+
+def test_실제_지식베이스가_실제_상황에서_뜬다(rs: RuleSet):
+    """안 뜨는 지식은 없는 것과 같다. 16건이 놀고 있지 않은지 본다."""
+    clear_cache()
+    assert load(), "지식베이스가 비었다"
+
+    case = joint_case()
+    r = compute_jongbuse(
+        case, ME, rs, track=Track.REFORM, options=JongbuseOptions(holding_years=12)
+    )
+    out = advise(case, ME, rs, track=Track.REFORM, result=r)
+    assert out, "부부공동명의 고령 거주자에게 아무 조언도 안 떴다"
+    for a in out:
+        assert a.displayable
+        assert a.advisory.basis
+        assert a.advisory.caveats_ko

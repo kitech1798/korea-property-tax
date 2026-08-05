@@ -46,10 +46,12 @@ def test_핵심_문구가_화면에_있다():
     assert "근거 조문" in text or "계산 근거" in text
 
 
-def test_세_탭이_모두_있다():
+def test_네_탭이_모두_있다():
     at = run()
     assert_clean(at)
-    assert len(at.tabs) == 3
+    labels = [t.label for t in at.tabs]
+    assert len(labels) == 4, labels
+    assert any("상담" in x for x in labels)
 
 
 def test_개편안_트랙으로_바꿔도_예외가_없다():
@@ -201,3 +203,34 @@ def test_주소_검색이_실패해도_화면이_죽지_않는다(monkeypatch):
     assert_clean(at)  # 가짜 키라 호출이 실패하지만 예외로 죽으면 안 된다
     text = " ".join(e.value for e in at.error) + " ".join(w.value for w in at.warning)
     assert "직접 입력" in text
+
+
+# --------------------------------------------------------------------------
+# ④ 상담 탭 — 지식이 화면까지 도달하는가
+# --------------------------------------------------------------------------
+
+
+def test_상담_탭에_근거_조문과_부작용이_함께_나온다():
+    """조언만 크게 보여주고 부작용을 접어두면 사용자는 부작용을 안 읽는다.
+    "부부공동명의로 바꾸세요"만 보고 증여세를 모르면 조언이 아니라 함정이다."""
+    at = run()
+    assert_clean(at)
+    text = " ".join(m.value for m in at.markdown) + " ".join(c.value for c in at.caption)
+    assert "놓치면 손해 보는 것" in text, "부작용 섹션이 화면에 없다"
+    assert "근거 ·" in text, "근거 조문이 화면에 없다"
+    assert "런타임" not in text  # 내부 용어가 새어나오면 안 된다
+
+
+def test_상담_탭이_런타임_생성이_아님을_밝힌다():
+    """매번 새로 생성한 문장이 아니라는 사실 자체가 이 서비스의 주장이다."""
+    at = run()
+    assert_clean(at)
+    text = " ".join(c.value for c in at.caption)
+    assert "조문과 대조해" in text or "같은 상황에는 언제나 같은 답" in text
+
+
+def test_양도_계획을_켜도_예외가_없다():
+    at = AppTest.from_file("app.py", default_timeout=TIMEOUT).run()
+    assert_clean(at)
+    at.checkbox(key="advice_sale").set_value(True).run()
+    assert_clean(at)

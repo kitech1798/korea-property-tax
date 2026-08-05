@@ -33,6 +33,7 @@ from realestate_tax.domain import (
     ResidenceSpell,
     TaxCase,
 )
+from realestate_tax.advisory import advise as A_ADVISE
 from realestate_tax.engine.jongbuse import (
     JongbuseOptions,
     compare_joint_spouse_election,
@@ -149,8 +150,8 @@ if "houses" not in st.session_state:
         }
     ]
 
-tab_input, tab_holding, tab_sell = st.tabs(
-    ["① 상황 입력", "② 보유세 · 4년 타임라인", "③ 팔까 버틸까"]
+tab_input, tab_holding, tab_sell, tab_advice = st.tabs(
+    ["① 상황 입력", "② 보유세 · 4년 타임라인", "③ 팔까 버틸까", "④ 상담"]
 )
 
 
@@ -531,6 +532,50 @@ with tab_sell:
 
         st.markdown("#### 계산 근거")
         R.trace_tree(detail.trace)
+
+
+# ==========================================================================
+# ④ 상담 — 런타임 LLM 호출 0회
+# ==========================================================================
+
+with tab_advice:
+    st.markdown("### 이 상황에서 알아야 할 것")
+    st.caption(
+        "매번 새로 생성한 문장이 아닙니다. **개발 시점에** 여러 검토자가 조문과 대조해 "
+        "만들어 둔 상담 노트를, 엔진이 판정한 결과로 골라 꺼냅니다. "
+        "그래서 같은 상황에는 언제나 같은 답이 나오고, 모든 문장에 근거 조문이 붙습니다."
+    )
+
+    plan_sale = st.checkbox(
+        "가까운 시일에 팔 생각이 있습니다",
+        key="advice_sale",
+        help="양도 관련 항목을 함께 보여드립니다.",
+    )
+
+    advice_case = build_case(year)
+    advice_result = compute_jongbuse(
+        advice_case, ME, rs, track=effective_track, options=main_options()
+    )
+    picked = A_ADVISE(
+        advice_case, ME, rs,
+        track=effective_track,
+        result=advice_result,
+        transfer_planned=plan_sale,
+    )
+
+    R.advisories(
+        picked,
+        empty_hint=(
+            "이 상황에 해당하는 상담 노트가 아직 없습니다. "
+            "계산 결과와 근거 조문은 ②·③ 탭에서 확인하실 수 있습니다."
+        ),
+    )
+
+    if picked:
+        st.caption(
+            f"{len(picked)}건 · 조건이 구체적인 항목부터 보여드립니다. "
+            "여기 없는 특례가 적용될 수 있으니, 실제 신고 전에는 세무 전문가의 확인을 받으세요."
+        )
 
 
 st.divider()
