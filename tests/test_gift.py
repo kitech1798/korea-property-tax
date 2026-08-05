@@ -177,3 +177,92 @@ def test_배우자가_없으면_제안하지_않는다(rs: RuleSet):
         ownerships=(Ownership(person_id=ME, property_id=PropertyId("h"), acquired_on=date(2012, 5, 1)),),
     )
     assert not [s for s in consult(case, ME, rs).strategies if s.key == "spouse_gift"]
+
+
+# --------------------------------------------------------------------------
+# 납부유예 — 감면이 아니라 유예다 (종부세법 §20의2)
+# --------------------------------------------------------------------------
+
+
+def _one_house_case(birth: date, acquired: date, price: int) -> TaxCase:
+    from realestate_tax.domain import ResidenceSpell
+
+    return TaxCase(
+        year=2027,
+        persons=(Person(id=ME, birth_date=birth, household_id=HouseholdId("hh")),),
+        households=(Household(id=HouseholdId("hh"), member_ids=(ME,)),),
+        properties=(
+            Property(id=PropertyId("h"), kind=PropertyKind.APARTMENT,
+                     legal_dong_code="1168010100",
+                     published_prices=(PriceFact(2027, price),)),
+        ),
+        ownerships=(Ownership(person_id=ME, property_id=PropertyId("h"), acquired_on=acquired),),
+        residences=(ResidenceSpell(person_id=ME, property_id=PropertyId("h"), start=acquired),),
+    )
+
+
+def _check(case: TaxCase, rs: RuleSet):
+    from realestate_tax.engine.deferral import check_deferral
+    from realestate_tax.engine.jongbuse import compute_jongbuse
+    from realestate_tax.engine.periods import holding_years
+    from realestate_tax.engine.special_houses import assess
+    from realestate_tax.rules import Track
+
+    result = compute_jongbuse(case, ME, rs, track=Track.REFORM)
+    a = assess(case, ME, rs, track=Track.REFORM)
+    return check_deferral(
+        case, ME, rs,
+        jongbuse_amount=result.net_tax.as_int(),
+        one_house=a.is_one_house,
+        holding_years=holding_years(case, ME, PropertyId("h"), case.assessment_date),
+        track=Track.REFORM,
+    )
+
+
+def test_고령_1주택자는_납부유예_요건을_갖춘다(rs: RuleSet):
+    """집은 있는데 현금이 없는 사람의 실제 답이다. 개편안이 보유세를 올리면서
+    쓸모가 커졌다 — "줄일 방법이 없습니다"로 끝내면 그 사람은 집을 팔아야 한다."""
+    c = _check(_one_house_case(date(1958, 4, 2), date(2010, 3, 1), 3_000_000_000), rs)
+    assert c.eligible_so_far
+    assert c.worth_showing
+    assert c.deferrable > 0
+    assert any("60세 이상" in m for m in c.met_ko)
+
+
+def test_연령과_보유기간은_둘_중_하나만_충족해도_된다(rs: RuleSet):
+    """조문이 "만 60세 이상이거나 해당 주택을 5년 이상 보유"로 **잇는다**.
+    둘 다 요구하면 자격 있는 사람을 잘못 막는다."""
+    young_but_long = _check(_one_house_case(date(1990, 1, 1), date(2010, 3, 1), 3_000_000_000), rs)
+    assert young_but_long.eligible_so_far
+    assert any("보유" in m and "5년 이상" in m for m in young_but_long.met_ko)
+
+
+def test_요건에_미달하면_이유를_대고_막는다(rs: RuleSet):
+    """36세·보유 3년 — 연령도 보유도 못 채운다."""
+    c = _check(_one_house_case(date(1990, 1, 1), date(2024, 3, 1), 3_000_000_000), rs)
+    assert not c.eligible_so_far
+    assert not c.worth_showing
+    assert any("60세 미만" in f for f in c.failed_ko)
+
+
+def test_세액이_100만원_이하면_대상이_아니다(rs: RuleSet):
+    """§20의2①4호 "해당 연도의 주택분 종합부동산세액이 100만원을 초과할 것"."""
+    c = _check(_one_house_case(date(1958, 4, 2), date(2010, 3, 1), 1_300_000_000), rs)
+    assert not c.eligible_so_far
+    assert any("100만" in f or "1,000,000" in f for f in c.failed_ko)
+
+
+def test_소득요건은_가정하지_않고_묻는다(rs: RuleSet):
+    """사건 모델에 소득이 없다. 모르는 것을 충족한 것으로 가정하면
+    자격 없는 사람에게 신청하라고 말하게 된다."""
+    c = _check(_one_house_case(date(1958, 4, 2), date(2010, 3, 1), 3_000_000_000), rs)
+    joined = " ".join(c.asks_ko)
+    assert "총급여" in joined and "70,000,000" in joined
+    assert "종합소득금액" in joined and "60,000,000" in joined
+
+
+def test_취소_사유를_함께_말한다(rs: RuleSet):
+    """유예는 공짜가 아니다 — 팔거나 물려주면 이자상당가산액과 함께 징수된다."""
+    c = _check(_one_house_case(date(1958, 4, 2), date(2010, 3, 1), 3_000_000_000), rs)
+    joined = " ".join(c.revoke_reasons_ko)
+    assert "양도" in joined and "상속" in joined
