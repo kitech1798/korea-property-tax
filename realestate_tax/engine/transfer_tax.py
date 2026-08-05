@@ -383,8 +383,11 @@ def compute_transfer_tax(
             ),
             branch=BranchRecord(
                 condition_ko="1세대1주택 해당 여부",
+                # ★ 어떤 특례가 걸렸는지는 `applied_special`이 말한다. 여기에 조항을
+                #   박아 두면 다른 특례가 붙는 날 **틀린 근거**를 표시한다 —
+                #   오늘 룰셋에서 고친 조항 오기와 같은 실수다(2026-08-05).
                 taken=(
-                    "1세대1주택 (시행령 §155① 일시적 2주택 특례)"
+                    f"1세대1주택 ({applied_special.split(' —')[0]})"
                     if applied_special
                     else ("1세대1주택" if one_house else f"{house_count}주택")
                 ),
@@ -608,16 +611,54 @@ def _transfer_house_count(
                 )
                 return (property_id,), applied, ""
 
-    # ── 확인이 필요한 특례는 적용하지 않고 알린다 ────────────────────
+    # ── §155② 상속주택 — 일반주택을 양도할 때만, 동일세대가 아닐 때만 ─
+    inherited_ids = {
+        pid for pid, rows in owned.items()
+        if any(o.cause is AcquisitionCause.INHERITANCE and o.inherited for o in rows)
+    }
+    if payload and len(counted) == 2 and len(inherited_ids) == 1:
+        (inherited_id,) = inherited_ids
+        metas = [
+            o.inherited for rows in owned.values() for o in rows
+            if o.property_id == inherited_id and o.inherited
+        ]
+        same_household = metas[0].same_household_at_death if metas else None
+        # 조문이 "**일반주택**을 양도하는 경우"라고 못 박는다.
+        # 상속주택을 팔면 특례가 아니다 — 방향을 뒤집으면 비과세를 잘못 내준다.
+        if property_id != inherited_id:
+            if same_household is False:
+                applied = (
+                    f"상속주택 특례(§155②) — 상속주택({inherited_id})을 주택 수에서 제외하고 "
+                    "일반주택을 양도. 상속개시 당시 피상속인과 별도 세대"
+                )
+                return (property_id,), applied, ""
+            if same_household is None:
+                return counted, "", (
+                    "상속받은 주택이 있습니다. **일반주택**을 양도하면 상속주택은 주택 수에서 "
+                    "빠져 1세대1주택이 될 수 있습니다(§155②). 다만 **상속개시 당시 피상속인과 "
+                    "같은 세대였는지**에 따라 결론이 정반대로 갈리는데(§155② 단서) 그 사실이 "
+                    "입력되지 않아 판정하지 않았습니다"
+                )
+            # same_household is True → 단서: 동거봉양 합가로 2주택이 된 경우
+            #   '합치기 이전부터 보유하던 주택'만 상속주택으로 본다. 합가 시점을
+            #   입력받지 않으므로 판정하지 않는다.
+            return counted, "", (
+                "상속개시 당시 피상속인과 같은 세대였습니다. 이 경우 §155② 단서에 따라 "
+                "**동거봉양 합가**로 2주택이 된 경우의 '합치기 이전부터 보유하던 주택'만 "
+                "상속주택으로 봅니다. 합가 시점을 입력받지 않아 판정하지 않았습니다"
+            )
+
+    # ── 확인이 필요한 나머지는 적용하지 않고 알린다 ──────────────────
     hints: list[str] = []
-    if any(
-        o.cause is AcquisitionCause.INHERITANCE
-        for rows in owned.values() for o in rows
-    ):
+    if inherited_ids and property_id in inherited_ids:
         hints.append(
-            "상속받은 주택이 있습니다. **일반주택**을 양도하는 경우 상속주택은 주택 수에서 "
-            "빠집니다(§155②). 다만 상속개시 당시 피상속인과 동일세대였는지에 따라 달라져 "
-            "엔진이 판정하지 않았습니다"
+            "양도하려는 주택이 **상속받은 주택**입니다. §155②는 상속주택이 아니라 "
+            "**일반주택**을 양도할 때 적용되므로 이 양도에는 특례가 없습니다"
+        )
+    elif inherited_ids:
+        hints.append(
+            "상속받은 주택이 있습니다. 일반주택을 양도하면 §155② 특례를 볼 수 있으나 "
+            "주택이 3채 이상이라 조문 요건(각 1개씩)에 맞지 않습니다"
         )
     if len(counted) == 2 and not applied:
         hints.append(

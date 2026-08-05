@@ -205,6 +205,7 @@ if "houses" not in st.session_state:
             "cause": "매매",
             "inheritance_date": date(2024, 1, 1),
             "inherited_share": 100,
+            "inherited_same_household": "모름",
             "rental": False,
             "rental_declared": False,
             "urban": True,
@@ -355,6 +356,24 @@ with tab_input:
                 h["inherited_share"] = f.number_input(
                     "상속 지분율(%)", 1, 100, h["inherited_share"], key=f"is{i}"
                 )
+                # 양도세 상속주택 특례(시행령 §155②)가 이 한 줄로 갈린다.
+                # 3지선다인 이유: '모른다'가 실제 상태이고, 모르면 판정하지 않는다.
+                # ★ `h[...]`가 아니라 `h.get(...)`이다. 세션에 이미 들어 있는 주택
+                #   딕셔너리에는 **오늘 추가한 키가 없다.** 브라우저를 열어둔 채로
+                #   배포되면 KeyError로 화면이 통째로 죽는다. 새 항목을 추가할 때는
+                #   항상 기본값과 함께 읽는다.
+                _SAME_HH = ["모름", "아니오 (따로 살았음)", "예 (같이 살았음)"]
+                h["inherited_same_household"] = f.selectbox(
+                    "상속 당시 고인과 같은 세대였나요?",
+                    _SAME_HH,
+                    index=_SAME_HH.index(h.get("inherited_same_household", "모름")),
+                    key=f"ish{i}",
+                    help=(
+                        "양도세에서 상속주택을 주택 수에서 뺄지가 이 답으로 갈립니다"
+                        "(소득세법 시행령 §155② 단서). 따로 사시던 부모님 집을 상속받은 "
+                        "경우가 '아니오'입니다. 종합부동산세에는 이 요건이 없습니다."
+                    ),
+                )
             h["rental"] = f.checkbox("등록임대주택", h["rental"], key=f"rt{i}")
             if h["rental"]:
                 h["rental_declared"] = f.checkbox(
@@ -425,6 +444,11 @@ def build_case(target_year: int) -> TaxCase:
                 inheritance_date=h["inheritance_date"],
                 share=Fraction(h["inherited_share"], 100),
                 inherited_value=int(h["price"] * Fraction(h["inherited_share"], 100)),
+                same_household_at_death={
+                    "모름": None,
+                    "아니오 (따로 살았음)": False,
+                    "예 (같이 살았음)": True,
+                }[h.get("inherited_same_household", "모름")],
             )
         elif h["cause"] == "증여":
             cause = AcquisitionCause.GIFT

@@ -346,3 +346,102 @@ def test_확인이_필요한_특례는_적용하지_않고_알린다(rs: RuleSet
     assert "income_tax_house_count_special" in alts
     assert alts["income_tax_house_count_special"].actionable
     assert "§155①" in alts["income_tax_house_count_special"].reason_ko
+
+
+# --------------------------------------------------------------------------
+# §155② 상속주택 — 한 줄의 사실이 결론을 뒤집는다
+# --------------------------------------------------------------------------
+
+INH = PropertyId("inh")
+
+
+def _inherited_case(same_household: bool | None) -> TaxCase:
+    """내 집 1채 + 상속받은 집 1채. 가장 흔한 2주택 구성이다."""
+    from fractions import Fraction
+
+    from realestate_tax.domain import AcquisitionCause, InheritedMeta
+
+    return TaxCase(
+        year=2027,
+        persons=(Person(id=P1, birth_date=date(1975, 1, 1), household_id=HouseholdId("hh")),),
+        households=(Household(id=HouseholdId("hh"), member_ids=(P1,)),),
+        properties=(
+            Property(id=MAIN, kind=PropertyKind.APARTMENT, legal_dong_code=BUSAN,
+                     published_prices=(PriceFact(2027, 900_000_000),)),
+            Property(id=INH, kind=PropertyKind.APARTMENT, legal_dong_code=MOKPO,
+                     published_prices=(PriceFact(2027, 500_000_000),)),
+        ),
+        ownerships=(
+            Ownership(person_id=P1, property_id=MAIN, acquired_on=date(2015, 3, 1)),
+            Ownership(
+                person_id=P1, property_id=INH, acquired_on=date(2024, 5, 10),
+                cause=AcquisitionCause.INHERITANCE,
+                inherited=InheritedMeta(
+                    inheritance_date=date(2024, 5, 10), share=Fraction(1),
+                    inherited_value=500_000_000, same_household_at_death=same_household,
+                ),
+            ),
+        ),
+        residences=(ResidenceSpell(person_id=P1, property_id=MAIN, start=date(2015, 3, 1)),),
+    )
+
+
+def _sell(pid: PropertyId) -> TransferEvent:
+    return TransferEvent(
+        property_id=pid, person_id=P1, transfer_date=date(2027, 6, 15),
+        transfer_price=1_100_000_000, acquisition_price=600_000_000,
+    )
+
+
+def test_별도세대_상속이면_일반주택_양도가_1세대1주택이다(rs: RuleSet):
+    """소득세법 시행령 §155② 본문 — 상속주택과 일반주택을 각 1개씩 가진 1세대가
+    **일반주택**을 양도하면 1주택으로 본다. 따로 살던 부모 집을 상속받은,
+    가장 흔한 경우다."""
+    result = compute_transfer_tax(_inherited_case(False), _sell(MAIN), rs, track=Track.CURRENT)
+    assert result.total.as_int() == 0
+    assert "§155②" in result.trace.find("tr.01.house_count").branch.taken
+
+
+def test_상속주택을_양도하면_특례가_아니다(rs: RuleSet):
+    """조문이 "**일반주택**을 양도하는 경우"라고 못 박는다. 방향을 뒤집으면
+    비과세를 잘못 내주게 된다."""
+    result = compute_transfer_tax(_inherited_case(False), _sell(INH), rs, track=Track.CURRENT)
+    assert result.total.as_int() > 0
+    assert "2주택" in result.trace.find("tr.01.house_count").branch.taken
+
+
+def test_동일세대_상속은_판정하지_않는다(rs: RuleSet):
+    """§155② 단서 — 상속개시 당시 1세대였으면 동거봉양 합가 여부까지 봐야 한다.
+
+    합가 시점을 입력받지 않으므로 판정하지 않는다. 세액을 낮추는 방향이라
+    확인 못 한 채 적용하면 과소신고가 된다."""
+    result = compute_transfer_tax(_inherited_case(True), _sell(MAIN), rs, track=Track.CURRENT)
+    assert result.total.as_int() > 0
+    reasons = " ".join(a.reason_ko for a in result.trace.all_alternatives())
+    assert "동거봉양" in reasons
+
+
+def test_동일세대_여부를_모르면_적용하지_않고_묻는다(rs: RuleSet):
+    """결론이 정반대로 갈리는 사실이 비었다. 유리한 쪽으로 가정하지 않는다."""
+    result = compute_transfer_tax(_inherited_case(None), _sell(MAIN), rs, track=Track.CURRENT)
+    assert result.total.as_int() > 0
+    alts = {a.key: a for a in result.trace.all_alternatives()}
+    assert alts["income_tax_house_count_special"].actionable
+    assert "같은 세대" in alts["income_tax_house_count_special"].reason_ko
+
+
+def test_적용된_특례가_자기_조항을_표시한다(rs: RuleSet):
+    """배지에 조항을 박아 두면 다른 특례가 붙는 날 틀린 근거를 표시한다."""
+    inherited = compute_transfer_tax(_inherited_case(False), _sell(MAIN), rs, track=Track.CURRENT)
+    temporary = compute_transfer_tax(
+        _two_acquisitions(date(2018, 3, 1), date(2025, 9, 1)), _sell_old(), rs, track=Track.CURRENT
+    )
+    assert "§155②" in inherited.trace.find("tr.01.house_count").branch.taken
+    assert "§155①" in temporary.trace.find("tr.01.house_count").branch.taken
+
+
+def _sell_old() -> TransferEvent:
+    return TransferEvent(
+        property_id=OLD, person_id=P1, transfer_date=date(2027, 6, 15),
+        transfer_price=1_100_000_000, acquisition_price=600_000_000,
+    )
