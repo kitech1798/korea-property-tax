@@ -266,3 +266,64 @@ def test_취소_사유를_함께_말한다(rs: RuleSet):
     c = _check(_one_house_case(date(1958, 4, 2), date(2010, 3, 1), 3_000_000_000), rs)
     joined = " ".join(c.revoke_reasons_ko)
     assert "양도" in joined and "상속" in joined
+
+
+# --------------------------------------------------------------------------
+# 합산배제 임대주택 — 판정은 되는데 "신고하세요"를 안 했다
+# --------------------------------------------------------------------------
+
+
+def _rental_case(declared: bool) -> TaxCase:
+    from realestate_tax.domain import (
+        Election, ElectionKind, RentalRegistration, RentalType, ResidenceSpell,
+    )
+
+    props = (
+        Property(id=PropertyId("main"), display_name="본가", kind=PropertyKind.APARTMENT,
+                 legal_dong_code="1168010100",
+                 published_prices=(PriceFact(2026, 2_000_000_000),)),
+        Property(id=PropertyId("rent"), display_name="임대주택", kind=PropertyKind.APARTMENT,
+                 legal_dong_code="4611010100",
+                 published_prices=(PriceFact(2026, 500_000_000),),
+                 rental=RentalRegistration(
+                     rental_type=RentalType.BUILT_LONG_TERM,
+                     registered_on=date(2020, 1, 15), obligation_end=date(2030, 1, 15))),
+    )
+    return TaxCase(
+        year=2026,
+        persons=(Person(id=ME, birth_date=date(1965, 1, 1), household_id=HouseholdId("hh")),),
+        households=(Household(id=HouseholdId("hh"), member_ids=(ME,)),),
+        properties=props,
+        ownerships=tuple(
+            Ownership(person_id=ME, property_id=p.id, acquired_on=date(2015, 1, 1)) for p in props
+        ),
+        residences=(ResidenceSpell(person_id=ME, property_id=PropertyId("main"), start=date(2015, 1, 1)),),
+        elections=((Election(person_id=ME, kind=ElectionKind.RENTAL_EXCLUSION),) if declared else ()),
+    )
+
+
+def test_합산배제_신고를_안_했으면_하라고_말한다(rs: RuleSet):
+    """엔진은 이미 판정하고 있었다. 없던 것은 **"신고하세요"라는 말**이다.
+
+    합산배제는 주택 수만 빼주는 게 아니라 **과세표준 합산에서 제외**된다 —
+    그 주택에는 종부세가 아예 붙지 않아 절감폭이 크다.
+    실측에서 신고 하나로 종부세 1,050만원이 80만원이 됐는데 화면은 아무 말도 안 했다.
+    """
+    found = [s for s in consult(_rental_case(False), ME, rs).strategies if s.key == "rental_exclusion"]
+    assert found, "합산배제 신고 안내가 없다"
+    assert found[0].saving > 0
+
+
+def test_이미_신고했으면_다시_권하지_않는다(rs: RuleSet):
+    assert not [
+        s for s in consult(_rental_case(True), ME, rs).strategies if s.key == "rental_exclusion"
+    ]
+
+
+def test_추징_위험을_반드시_말한다(rs: RuleSet):
+    """의무임대기간을 못 채우면 면제받은 세액이 추징된다(종부세법 §17③).
+    절감액만 보여주고 이걸 빼면 조언이 아니라 함정이다."""
+    s = [x for x in consult(_rental_case(False), ME, rs).strategies if x.key == "rental_exclusion"][0]
+    joined = " ".join(s.caveats_ko)
+    assert "추징" in joined
+    assert "5%" in joined or "5퍼센트" in joined

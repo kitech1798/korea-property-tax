@@ -22,6 +22,7 @@ from typing import Sequence
 
 from ..domain.certainty import Certainty, InputQuality, LegalStatus
 from ..domain.models import (
+    Election,
     PersonId,
     PriceFact,
     ResidenceSpell,
@@ -319,6 +320,7 @@ def consult(
     strategies.extend(_joint_spouse_strategy(case, person_id, ruleset, options, years))
     strategies.extend(_move_in_strategy(case, person_id, ruleset, options, years, growth))
     strategies.extend(_spouse_gift_strategy(case, person_id, ruleset, options, years, growth))
+    strategies.extend(_rental_exclusion_strategy(case, person_id, ruleset, options, years, growth))
 
     # 효과가 정확히 0인 대안은 말할 것이 없다. 남겨두면 "실거주 전환 — 0원 손해"처럼
     # 뜻 없는 줄이 화면을 채우고, 진짜 경고(음수)까지 같이 무시당한다.
@@ -327,6 +329,84 @@ def consult(
 
     notes = _notes(case, person_id, ruleset, options, years, growth)
     return Consultation(person_id, timeline, tuple(strategies), notes)
+
+
+def _rental_exclusion_strategy(
+    case: TaxCase,
+    person_id: PersonId,
+    ruleset: RuleSet,
+    options: JongbuseOptions,
+    years: Sequence[TaxYear],
+    growth: float,
+) -> list[Strategy]:
+    """합산배제 임대주택 신고(종부세법 §8②, 시행령 §3).
+
+    ★ 다른 특례와 성격이 다르다. 주택 수만 빼주는 게 아니라 **과세표준 합산에서
+      제외**된다 — 그 주택에는 종부세가 아예 붙지 않는다. 그래서 절감폭이 크다.
+
+    엔진은 이미 판정하고 있었다. 없던 것은 **"신고하세요"라는 말**이다.
+    실측에서 신고 하나로 1,050만원이 80만원이 됐는데 화면은 아무 말도 안 했다.
+    계산이 맞는 것과 사용자가 행동할 수 있는 것은 다르다.
+    """
+    from ..domain.models import ElectionKind
+
+    reform_years = tuple(y for y in years if y > 2026)
+    if not reform_years:
+        return []
+
+    # 등록임대주택인데 **신고하지 않은** 것이 있는가.
+    candidates = [
+        o.property_id
+        for o in case.ownerships_of(person_id)
+        if case.find_property(o.property_id).rental is not None
+    ]
+    if not candidates:
+        return []
+    if case.election(person_id, ElectionKind.RENTAL_EXCLUSION) is not None:
+        return []  # 이미 신고했다
+
+    baseline = _sum_reform_years(case, person_id, ruleset, options, years, growth)
+    declared = replace(
+        case,
+        elections=case.elections
+        + (Election(person_id=person_id, kind=ElectionKind.RENTAL_EXCLUSION),),
+    )
+    alternative = _sum_reform_years(declared, person_id, ruleset, options, years, growth)
+
+    names = ", ".join(
+        case.find_property(pid).display_name or str(pid) for pid in candidates
+    )
+    return [
+        Strategy(
+            key="rental_exclusion",
+            label_ko=f"합산배제 임대주택 신고 ({names})",
+            what_to_do_ko=(
+                "매년 **9월 16일~30일**에 관할세무서장에게 합산배제 신고서를 냅니다. "
+                "합산배제되면 그 주택은 과세표준에서 아예 빠져 종합부동산세가 붙지 않고, "
+                "1세대1주택자 판정의 주택 수에서도 제외됩니다. "
+                "한 번 신고하면 변동이 없는 한 다음 해부터는 다시 내지 않아도 됩니다."
+            ),
+            basis_ko="종합부동산세법 §8②, 시행령 §3",
+            baseline=baseline,
+            alternative=alternative,
+            years=reform_years,
+            requirements_ko=(
+                "「민간임대주택특별법」에 따라 임대사업자로 등록하고 사업자등록도 할 것",
+                "임대개시일 당시 공시가격이 요건 이하일 것(유형·지역별로 다릅니다)",
+                "임대료 증액을 **5% 이내**로 지킬 것",
+                "의무임대기간을 채울 것(장기일반민간임대 10년)",
+            ),
+            caveats_ko=(
+                "⚠️ **의무임대기간을 못 채우면 그동안 면제받은 세액이 추징**됩니다"
+                "(종부세법 §17③). 임대료 5% 제한을 어겨도 같습니다.",
+                "조정대상지역의 **매입임대 아파트**는 개편안에서 단계적으로 배제됩니다 — "
+                "등록 시기와 유형에 따라 달라지므로 등록증으로 확인하세요.",
+                "이 계산은 임대유형·가액·면적 요건을 **충족한다고 보고** 낸 것입니다. "
+                "요건 충족 여부는 임대사업자 등록증으로만 확인됩니다.",
+            ),
+            certainty=Certainty(legal=LegalStatus.BILL_PENDING),
+        )
+    ]
 
 
 def _household_reform_total(
