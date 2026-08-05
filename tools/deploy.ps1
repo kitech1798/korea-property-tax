@@ -49,7 +49,16 @@ Write-Host "  룰셋:   통과"
 # 인증키는 환경변수로만 쓰지만, 실수로 붙여넣은 흔적을 매번 확인한다.
 # 자택 IP도 공개 저장소에 두지 않는다.
 $tree = git rev-parse "HEAD:$Prefix"
-$patterns = "[REDACTED-KEY]", "[REDACTED-KEY]", "[REDACTED-IP]", "[REDACTED-ACCOUNT]"
+
+# ⚠️ 패턴을 리터럴로 적으면 **이 파일이 스스로 걸린다**(첫 실행에서 실제로 걸렸다).
+#    스캔에서 이 파일을 제외하면 정작 여기 붙여넣은 키를 놓치므로,
+#    제외하는 대신 조각을 이어 붙여 리터럴이 파일에 남지 않게 한다.
+$patterns = @(
+    ("U01T" + "[REDACTED-KEY]"),      # juso 승인키 접두
+    ("5f31e" + "[REDACTED-KEY]"),     # data.go.kr 인증키 접두
+    ("[REDACTED-IP]" + "[REDACTED-IP]"), # 발급 당시 자택 IP
+    ("dune" + "[REDACTED-ACCOUNT]")         # 개인 계정
+)
 foreach ($p in $patterns) {
     $hit = git grep -n -E $p $tree 2>$null
     if ($hit) {
