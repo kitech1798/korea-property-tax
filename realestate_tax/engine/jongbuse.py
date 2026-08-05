@@ -29,6 +29,7 @@ from ..domain.models import (
     PersonId,
     PersonType,
     PropertyId,
+    ResidenceSpell,
     TaxCase,
     TaxYear,
     Won,
@@ -168,14 +169,28 @@ def compute_jongbuse(
     # 종부세법 §8④의 1세대1주택자는 '세대원 중 1명만이 1주택을 단독 소유'하는 경우다.
     # 부부공동명의는 §10의2 특례를 신청해야 1세대1주택자로 본다.
     counted_owned = [o for o in house_owned if o.property_id in assessment.counted]
-    solely_owned = all(o.share == 1 for o in counted_owned)
+
+    # ★ **행이 아니라 주택을 센다**(SIM-02, 2026-08-05 시뮬레이션에서 발견).
+    #   한 집을 여러 번에 나눠 취득하면 Ownership 행이 여러 개가 된다 — 추가 매수,
+    #   배우자 지분 증여, 공동상속인 지분 매수 모두 흔한 경로다. 행을 세면 한 채를
+    #   여러 채로 읽어 1세대1주택자 지위를 통째로 잃고, 기본공제 12억이 9억으로,
+    #   세액공제 최대 80%가 0%로 떨어진다. 사용자가 아무 잘못도 하지 않았는데.
+    #
+    #   단독 소유 여부도 마찬가지로 **주택별 지분 합**으로 봐야 한다.
+    #   1/2 + 1/2을 가진 사람은 단독 소유자다.
+    share_by_property: dict[PropertyId, Fraction] = {}
+    for o in counted_owned:
+        share_by_property[o.property_id] = share_by_property.get(o.property_id, Fraction(0)) + o.share
+    solely_owned = all(s == 1 for s in share_by_property.values())
+
     joint = _joint_spouse_status(case, person_id)
     elected = options.joint_spouse_election and joint.eligible
 
     one_house = (
         False
         if person.is_corporation
-        else elected or (assessment.is_one_house and len(counted_owned) == 1 and solely_owned)
+        else elected
+        or (assessment.is_one_house and len(share_by_property) == 1 and solely_owned)
     )
 
     children.append(
@@ -303,7 +318,7 @@ def compute_jongbuse(
     )
     credit, credit_node = _tax_credit(
         ruleset, on, track, case, person_id, one_house, credit_base, options, subject,
-        full_tax=after_ptc, ratio=credit_ratio,
+        assessment, full_tax=after_ptc, ratio=credit_ratio,
     )
     children.append(credit_node)
 
@@ -511,6 +526,87 @@ def _resides(
     if any(case.residences_of(m, main) for m in members):
         return False, "거주 이력은 있으나 과세기준일에 걸치지 않음"
     return False, "거주 사실 미입력 — 유리한 쪽으로 가정하지 않음"
+
+
+def _derive_periods(
+    options: JongbuseOptions,
+    case: TaxCase,
+    person_id: PersonId,
+    assessment: SpecialAssessment,
+    on: date,
+) -> tuple[int | None, int | None, str]:
+    """보유기간·거주기간을 **사건의 사실에서** 도출한다.
+
+    ★ `_resides`와 똑같은 실수가 한 함수 옆에서 반복되고 있었다(2026-08-05 시뮬레이션).
+      거주 *여부*는 `ResidenceSpell`을 읽도록 고쳤는데 거주 *기간*은 여전히
+      `options`만 봤다. 그래서 취득일과 거주 이력을 다 입력해도 옵션을 따로 주지
+      않으면 세액공제가 0으로 계산되고 UNDECIDABLE 배지가 붙었다.
+
+      70세·10년 거주 1주택자라면 연령 40% + 거주 40% = 80%를 받아야 하는데
+      40%만 받았다. 엔진을 라이브러리로 쓰는 모든 경로(Streamlit 앱 밖)가 영향을
+      받는다. 골든 테스트가 못 잡은 이유는 **테스트가 옵션을 손으로 먹여줬기** 때문이다.
+
+    근거
+      보유기간 — 종합부동산세법 §9의4②. 취득일부터 과세기준일까지.
+      거주기간 — 같은 조 개정안. 실제 거주한 기간의 합.
+
+    옵션이 주어지면 그쪽이 이긴다. 사용자가 직접 말한 값이 도출값보다 정확하다
+    (배우자 상속 시 피상속인 보유기간 통산 등 엔진이 모르는 특칙이 있다).
+    """
+    main = assessment.main_property_id
+    if main is None:
+        return options.holding_years, options.residence_years, "기준 1주택 없음"
+
+    holding = options.holding_years
+    source = []
+    if holding is None:
+        owned = [o for o in case.ownerships_of(person_id) if o.property_id == main]
+        acquired = [o.acquired_on for o in owned if o.acquired_on is not None]
+        if acquired:
+            # 지분을 여러 번 나눠 취득했으면 **가장 이른 날**이 보유 개시일이다.
+            holding = _full_years(min(acquired), on)
+            source.append(f"보유 {holding}년(취득일 {min(acquired)})")
+
+    residence = options.residence_years
+    if residence is None:
+        spells = case.residences_of(person_id, main)
+        if spells:
+            residence = _merged_years(spells, on)
+            source.append(f"거주 {residence}년(거주 이력 {len(spells)}구간)")
+
+    return holding, residence, " · ".join(source) or "도출할 사실 없음"
+
+
+def _full_years(start: date, on: date) -> int:
+    """만 연수. 생일 계산과 같은 규약을 쓴다 — 하루 차이로 공제 구간이 갈린다."""
+    years = on.year - start.year
+    if (on.month, on.day) < (start.month, start.day):
+        years -= 1
+    return max(0, years)
+
+
+def _merged_years(spells: Sequence[ResidenceSpell], on: date) -> int:
+    """거주 구간의 합을 만 연수로.
+
+    구간을 **병합한 뒤** 더한다. 겹치는 구간(본인이 두 줄로 나눠 입력한 경우 등)을
+    그냥 더하면 살지도 않은 기간이 공제로 둔갑한다.
+    """
+    windows: list[tuple[date, date]] = []
+    for s in spells:
+        finish = min(s.end, on) if s.end is not None else on
+        if finish > s.start:
+            windows.append((s.start, finish))
+    if not windows:
+        return 0
+    windows.sort()
+    merged: list[list[date]] = [list(windows[0])]
+    for start, finish in windows[1:]:
+        if start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], finish)
+        else:
+            merged.append([start, finish])
+    days = sum((f - s).days for s, f in merged)
+    return days // 365
 
 
 def _taxable_threshold(
@@ -758,17 +854,26 @@ def _effective_ownerships(
     부부공동명의 특례를 신청하면 배우자 지분까지 합산한다(시행령 §5의2⑥).
     신청하지 않으면 본인 지분만 — 재산세도 종부세도 지분만큼만 부담한다.
     `skip`은 합산배제 주택 — 과세표준에 들어가지 않는다.
+
+    ★ **한 사람이 같은 주택에 여러 지분 행을 갖는 경우를 합산한다**
+      (SIM-02 후속, 2026-08-05). 1/2을 두 번에 나눠 취득하면 Ownership 행이 두 개다.
+      예전에는 행마다 항목을 만들고 뒤에서 dict에 넣어 **두 번째 행이 첫 번째를
+      덮어썼다.** 결과적으로 100% 소유자가 1/2 소유자로 계산됐다 — 재산세가 반토막
+      나고, 그 반토막이 종부세 재산세공제 산식에 들어가 세액이 조용히 어긋났다.
+
+      실효지분을 세는 곳은 여기 하나여야 한다. 부르는 쪽마다 합산하게 하면
+      한 곳을 빠뜨리는 날이 온다.
     """
-    own = [
-        (o.property_id, o.share)
-        for o in case.ownerships_of(person_id)
-        if case.find_property(o.property_id).is_house and o.property_id not in skip
-    ]
+    merged: dict[PropertyId, Fraction] = {}
+    for o in case.ownerships_of(person_id):
+        if not case.find_property(o.property_id).is_house or o.property_id in skip:
+            continue
+        merged[o.property_id] = merged.get(o.property_id, Fraction(0)) + o.share
+
     if not elected:
-        return own
+        return list(merged.items())
 
     person = case.find_person(person_id)
-    merged: dict[PropertyId, Fraction] = {pid: share for pid, share in own}
     if person.spouse_id is not None:
         for o in case.ownerships_of(person.spouse_id):
             if case.find_property(o.property_id).is_house and o.property_id not in skip:
@@ -1120,6 +1225,7 @@ def _tax_credit(
     after_ptc: int,
     options: JongbuseOptions,
     subject: SubjectRef,
+    assessment: SpecialAssessment,
     *,
     full_tax: int | None = None,
     ratio: Fraction = Fraction(1),
@@ -1158,16 +1264,19 @@ def _tax_credit(
 
     hold_res = ruleset.resolve(f"{J}.credit_holding", on=on, track=track)
     payload = hold_res.block.payload
-    holding_years = options.holding_years
-    residence_years = options.residence_years
+    holding_years, residence_years, derived_from = _derive_periods(
+        options, case, person_id, assessment, on
+    )
 
     mode = payload.get("mode", "holding_only")
     if "tiers" in payload:  # 현행 — 보유공제만
         second_rate = _tier_rate(payload["tiers"], "min_years", holding_years)
         second_label = f"보유 {holding_years}년"
+        used = (holding_years,)
     elif mode == "residence_only":
         second_rate = _tier_rate(payload["residence_tiers"], "min_years", residence_years)
         second_label = f"거주 {residence_years}년"
+        used = (residence_years,)
     else:  # 2027 과도기 — 보유공제의 1/2과 거주공제 중 높은 쪽
         h = _tier_rate(payload["holding_tiers"], "min_years", holding_years)
         r = _tier_rate(payload["residence_tiers"], "min_years", residence_years)
@@ -1175,6 +1284,7 @@ def _tax_credit(
         second_label = (
             f"보유 {holding_years}년({h}) vs 거주 {residence_years}년({r}) 중 높은 쪽"
         )
+        used = (holding_years, residence_years)
 
     cap_res = ruleset.resolve(f"{J}.credit_rate_cap", on=on, track=track)
     rate_cap = cap_res.block.as_fraction()
@@ -1199,9 +1309,24 @@ def _tax_credit(
             )
         )
 
-    certainty = Certainty()
-    if holding_years is None and residence_years is None:
-        certainty = certainty & Certainty(determination=DeterminationQuality.UNDECIDABLE)
+    # ★ 판정 불가는 **그 해에 실제로 쓰이는 기간**이 없을 때만 붙인다.
+    #   예전에는 둘 다 없을 때만 붙였는데, 개편안(거주공제만 쓰는 해)에서 보유기간만
+    #   알고 거주기간을 모르면 공제 0%가 **확정인 척** 나갔다. 실제로는 모르는 것이다.
+    if all(v is None for v in used):
+        certainty = Certainty(determination=DeterminationQuality.UNDECIDABLE)
+        alternatives.append(
+            Alternative(
+                key="holding_residence_period",
+                label_ko="보유·거주기간 세액공제",
+                reason_ko=(
+                    "취득일·거주 이력이 없어 기간을 확정하지 못했습니다. "
+                    "입력하시면 최대 40%까지 공제됩니다."
+                ),
+                actionable=True,
+            )
+        )
+    else:
+        certainty = Certainty()
 
     value = derive_value(
         credit,
@@ -1236,7 +1361,7 @@ def _tax_credit(
         branch=BranchRecord(
             condition_ko="공제율 구성",
             taken=f"연령 {age}세({age_rate}) + {second_label}",
-            detail_ko=f"합계 {combined} (한도 {rate_cap})",
+            detail_ko=f"합계 {combined} (한도 {rate_cap}) · 기간 근거: {derived_from}",
         ),
         note_ko=(
             "상속주택·일시적2주택·지방저가주택이 있으면 그 주택분 산출세액을 "
