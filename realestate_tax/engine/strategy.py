@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date
+from fractions import Fraction
 from typing import Sequence
 
 from ..domain.certainty import Certainty, InputQuality, LegalStatus
@@ -58,6 +59,26 @@ class Strategy:
     caveats_ko: tuple[str, ...] = ()
     """부작용·놓치기 쉬운 비용. 비워두면 안 된다."""
     certainty: Certainty = Certainty()
+
+    upfront_cost: Won = 0
+    """실행 즉시 나가는 돈(증여세·취득세 등). 절감은 해마다 돌아오는데 이건 한 번에 나간다."""
+    annual_saving: Won = 0
+    """연 평균 절감액. 회수기간 계산의 분모."""
+
+    @property
+    def payback_years(self) -> float | None:
+        """몇 년이면 본전인가. 일회성 비용이 없으면 None(즉시 이득).
+
+        ★ 이게 없으면 조언이 거꾸로 나간다(2026-08-05). 증여는 비용이 **한 번에**
+          나가고 절감은 **해마다** 돌아온다. 비교 창이 3년뿐이면 거의 모든 증여가
+          '손해'로 찍히는데, 실제로는 5~6년이면 본전을 넘는 경우가 흔하다.
+          창의 길이가 결론을 만들면 그건 계산이 아니라 착시다.
+        """
+        if self.upfront_cost <= 0:
+            return None
+        if self.annual_saving <= 0:
+            return float("inf")
+        return self.upfront_cost / self.annual_saving
 
     @property
     def saving(self) -> Won:
@@ -297,9 +318,171 @@ def consult(
     strategies: list[Strategy] = []
     strategies.extend(_joint_spouse_strategy(case, person_id, ruleset, options, years))
     strategies.extend(_move_in_strategy(case, person_id, ruleset, options, years, growth))
+    strategies.extend(_spouse_gift_strategy(case, person_id, ruleset, options, years, growth))
+
+    # 효과가 정확히 0인 대안은 말할 것이 없다. 남겨두면 "실거주 전환 — 0원 손해"처럼
+    # 뜻 없는 줄이 화면을 채우고, 진짜 경고(음수)까지 같이 무시당한다.
+    # 음수는 남긴다 — "하면 손해"는 알아야 할 정보다.
+    strategies = [s for s in strategies if s.saving != 0]
 
     notes = _notes(case, person_id, ruleset, options, years, growth)
     return Consultation(person_id, timeline, tuple(strategies), notes)
+
+
+def _household_reform_total(
+    case: TaxCase,
+    people: Sequence[PersonId],
+    ruleset: RuleSet,
+    options: JongbuseOptions,
+    years: Sequence[TaxYear],
+    growth: float,
+) -> Won:
+    """세대 구성원 전원의 보유세 합계.
+
+    ★ **이 함수가 없으면 조언이 거짓말이 된다.**
+      지분을 배우자에게 넘기면 내 세금은 줄지만 배우자에게 세금이 생긴다.
+      본인 것만 비교하면 넘길수록 이득으로 보이고, 그 화면을 믿고 증여하면
+      세대 전체로는 손해를 볼 수 있다. 종부세는 인별 과세지만 **가계는 하나다.**
+    """
+    total = 0
+    for year in years:
+        if year <= 2026:
+            continue  # 개편안 효과는 2027년부터다
+        projected = project_case(case, year, growth=growth)
+        for pid in people:
+            total += compute_jongbuse(
+                projected, pid, ruleset, track=Track.REFORM, options=options
+            ).holding_tax_total
+    return total
+
+
+def _spouse_gift_strategy(
+    case: TaxCase,
+    person_id: PersonId,
+    ruleset: RuleSet,
+    options: JongbuseOptions,
+    years: Sequence[TaxYear],
+    growth: float,
+) -> list[Strategy]:
+    """배우자에게 지분 1/2을 증여해 인별 합산 공시가격을 나눈다.
+
+    종합부동산세는 **인별 과세**다. 한 사람에게 몰린 공시가격을 둘로 나누면
+    기본공제를 각자 받고 누진 구간도 낮아진다. 다주택자에게 특히 크다.
+
+    다만 공짜가 아니다 — 증여세·취득세가 **즉시** 나가고, 절감은 해마다 조금씩
+    돌아온다. 그래서 4년 누적 절감액에서 증여 비용을 빼고 나서야 이득인지 알 수 있다.
+    `Strategy.alternative`에 비용을 더해 넣으므로 `saving`이 곧 **순이익**이다.
+    """
+    from .gift import carryover_years, compute_spouse_gift_cost
+
+    person = case.find_person(person_id)
+    if person.spouse_id is None or person.is_corporation:
+        return []
+    try:
+        spouse = case.find_person(person.spouse_id)
+    except KeyError:
+        return []
+
+    reform_years = tuple(y for y in years if y > 2026)
+    if not reform_years:
+        return []
+
+    # 본인이 **단독으로** 가진 주택 중 가장 비싼 것을 나눈다.
+    # 이미 공동명의인 것을 더 쪼개는 것은 효과가 작고 §10의2 특례를 깨뜨릴 수 있다.
+    solo = [
+        o for o in case.ownerships_of(person_id)
+        if o.share == 1 and case.find_property(o.property_id).is_house
+    ]
+    if not solo:
+        return []
+    target = max(
+        solo,
+        key=lambda o: (case.find_property(o.property_id).price_for(case.year) or PriceFact(case.year, 0)).value,
+    )
+    prop = case.find_property(target.property_id)
+    fact = prop.price_for(case.year)
+    if fact is None or fact.value <= 0:
+        return []
+
+    # ★ **증여 규모를 공제 한도에 맞춘다**(2026-08-05).
+    #   지분 절반을 통째로 넘기면 증여세가 터져 거의 모든 사례가 '손해'로 찍혔다.
+    #   실무가 6억에 맞춰 나누는 이유가 그것이다 — 공제 안에서는 증여세가 0원이고
+    #   종부세 분산 효과는 그대로 얻는다. 한도를 넘겨서까지 나눌 이유가 없다.
+    ded_cap = int(ruleset.resolve(
+        "gift.spouse.deduction", on=case.assessment_date, track=Track.REFORM
+    ).block.value)
+    gift_value = min(fact.value // 2, ded_cap)
+    if gift_value <= 0:
+        return []
+    share = Fraction(gift_value, fact.value)
+    people = (person_id, spouse.id)
+
+    baseline = _household_reform_total(case, people, ruleset, options, reform_years, growth)
+
+    moved = replace(
+        case,
+        ownerships=tuple(o for o in case.ownerships if o is not target)
+        + (
+            replace(target, share=1 - share),
+            replace(target, person_id=spouse.id, share=share),
+        ),
+    )
+    after_tax = _household_reform_total(moved, people, ruleset, options, reform_years, growth)
+
+    cost = compute_spouse_gift_cost(
+        gift_value, ruleset, on=case.assessment_date, track=Track.REFORM
+    )
+    carry = carryover_years(ruleset, on=case.assessment_date)
+    annual = (baseline - after_tax) // max(1, len(reform_years))
+
+    return [
+        Strategy(
+            key="spouse_gift",
+            label_ko=(
+                f"배우자에게 '{prop.display_name or prop.id}' 지분 {share} 증여"
+                f" (공시 {gift_value:,}원어치)"
+            ),
+            what_to_do_ko=(
+                f"공시가격 기준 {gift_value:,}원어치 지분({share})을 배우자에게 증여하면 "
+                "종합부동산세가 두 사람에게 나뉘어 각자 기본공제를 받고 누진 구간도 낮아집니다. "
+                "증여일이 속하는 달의 말일부터 3개월 이내에 신고해야 신고세액공제 3%를 받습니다."
+            ),
+            basis_ko="종합부동산세법 §7①(인별 과세), 상속세 및 증여세법 §53①1호, 지방세법 §11①2",
+            baseline=baseline,
+            # 절감만 세면 거짓이 된다. 즉시 나가는 비용을 대안 쪽에 더해
+            # `saving`이 곧 순이익이 되게 한다.
+            alternative=after_tax + cost.total,
+            years=reform_years,
+            upfront_cost=cost.total,
+            annual_saving=annual,
+            requirements_ko=(
+                "법률상 배우자일 것 — 사실혼은 증여재산공제 대상이 아닙니다",
+                "증여 후 소유권이전등기를 마칠 것",
+                f"과세기준일(6월 1일) 이전에 등기를 마쳐야 그해 {reform_years[0]}년분부터 반영됩니다",
+            ),
+            caveats_ko=(
+                f"증여세 {cost.gift_tax:,}원 + 취득세 {cost.acquisition_tax:,}원 = "
+                f"**{cost.total:,}원이 즉시 나갑니다.** 절감은 해마다 나눠 돌아옵니다"
+                + (
+                    f" — 연 {annual:,}원씩이라 **약 {cost.total / annual:.1f}년이면 본전**입니다."
+                    if annual > 0
+                    else ". 이 사건에서는 절감이 없거나 오히려 늘어 **회수되지 않습니다.**"
+                ),
+                f"⚠️ **이월과세** — 증여 후 {carry}년 이내에 그 주택을 팔면 양도세 취득가액이 "
+                "증여 당시 가격이 아니라 **원래 취득가**로 돌아갑니다(소득세법 §97의2①). "
+                f"{carry}년 안에 매도 계획이 있으면 손익이 뒤집힐 수 있습니다.",
+                "배우자 증여재산공제 6억원은 **10년간 합산**입니다. 이미 증여한 이력이 "
+                "있으면 공제가 줄어 증여세가 늘어납니다(상증세법 §53① 후단).",
+                "조정대상지역의 일정가액 이상 주택은 증여 취득세가 12%로 중과됩니다"
+                "(지방세법 §13의2②). 해당 여부는 확인이 필요합니다.",
+                "⚠️ **1주택자는 대개 손해입니다.** 단독명의 1세대1주택자가 누리던 "
+                "연령·거주 세액공제(최대 80%)를 잃기 때문입니다. 부부공동명의가 되면 "
+                "§10의2 특례를 따로 신청해야 하고, 그 유불리는 또 달라집니다 — "
+                "이 계산은 특례 미신청 기준입니다.",
+            ),
+            certainty=Certainty(legal=LegalStatus.BILL_PENDING),
+        )
+    ]
 
 
 def _sum_reform_years(
