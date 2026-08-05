@@ -90,7 +90,27 @@ $commit = if ($parent) {
 } else {
     git commit-tree $tree -m $Message
 }
+# ⚠️ git은 정상 진행 상황도 stderr에 쓴다("To https://…"). 스크립트 맨 위의
+#    $ErrorActionPreference = "Stop"과 만나면 **성공한 푸시가 실패로 읽힌다.**
+#    실제로 2026-08-05에 그렇게 멈췄고, 원격은 멀쩡히 갱신돼 있었다.
+#    네이티브 명령의 성공 여부는 stderr가 아니라 **종료코드**로만 판단한다.
+$prev = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 git push $Remote "${commit}:refs/heads/main"
+$pushed = $LASTEXITCODE -eq 0
+$ErrorActionPreference = $prev
+if (-not $pushed) {
+    Write-Host "푸시에 실패했습니다 (종료코드 $LASTEXITCODE)." -ForegroundColor Red
+    exit 1
+}
+
+# 원격이 정말 이 커밋을 가리키는지 확인한다. "푸시했다"와 "반영됐다"는 다르다.
+$remoteHead = (git ls-remote $Remote main) -split "\s+" | Select-Object -First 1
+if ($remoteHead -ne $commit) {
+    Write-Host "원격 main이 $remoteHead 로 다릅니다. 배포를 확인하세요." -ForegroundColor Red
+    exit 1
+}
+
 Write-Host ""
 Write-Host "배포 완료 → https://github.com/kitech1798/korea-property-tax" -ForegroundColor Green
 Write-Host "Streamlit Cloud가 main 변경을 감지해 자동으로 다시 배포합니다."
