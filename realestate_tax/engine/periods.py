@@ -20,7 +20,8 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date
-from typing import Iterable, Sequence
+from fractions import Fraction
+from typing import Any, Mapping, Sequence
 
 from ..domain.models import PersonId, PropertyId, ResidenceSpell, TaxCase
 
@@ -92,17 +93,11 @@ def holding_years(
     return None if start is None else full_years(start, until)
 
 
-def merged_residence_years(spells: Sequence[ResidenceSpell], until: date) -> int:
-    """거주 구간의 합을 만 연수로. **구간을 병합한 뒤** 더한다.
+def _merged_days(windows: list[tuple[date, date]]) -> int:
+    """겹치는 구간을 병합한 뒤 일수를 더한다.
 
-    겹치는 구간(한 기간을 두 줄로 나눠 입력한 경우 등)을 그냥 더하면
-    살지도 않은 기간이 공제로 둔갑한다.
+    한 기간을 두 줄로 나눠 입력한 경우 그냥 더하면 살지도 않은 기간이 공제로 둔갑한다.
     """
-    windows = []
-    for s in spells:
-        finish = min(s.end, until) if s.end is not None else until
-        if finish > s.start:
-            windows.append((s.start, finish))
     if not windows:
         return 0
     windows.sort()
@@ -112,7 +107,73 @@ def merged_residence_years(spells: Sequence[ResidenceSpell], until: date) -> int
             merged[-1][1] = max(merged[-1][1], finish)
         else:
             merged.append([start, finish])
-    return sum((f - s).days for s, f in merged) // 365
+    return sum((f - s).days for s, f in merged)
+
+
+def merged_residence_years(
+    spells: Sequence[ResidenceSpell],
+    until: date,
+    *,
+    imputed: Mapping[str, Any] | None = None,
+) -> int:
+    """거주 구간의 합을 만 연수로.
+
+    ★ **인정 구간(`imputed_reason`)에는 상한이 있다**(2026-08-05 발견).
+      개편안은 부득이한 사유로 인한 비거주기간을 거주기간으로 인정하되
+      **최장 3년**으로 자른다(개조식 p.22 ➊). 재개발·재건축 공사기간은
+      **1/2만** 인정한다(➋).
+
+      엔진은 `ImputedResidenceReason`을 아예 읽지 않아 인정 구간을 상한 없이
+      전부 거주로 세고 있었다. 거주기간을 늘리는 규칙이라 **과소신고 방향**이다 —
+      모델에 있는 사실을 엔진이 안 읽는 실수의 여섯 번째이자, 방향이 가장 나쁜 것.
+
+    `imputed`가 없으면(현행법 트랙 등) **인정 구간을 아예 세지 않는다.**
+    근거 규칙이 없는데 인정해 주는 것이 가장 위험하다.
+    """
+    real: list[tuple[date, date]] = []
+    excused: list[tuple[date, date]] = []
+    rebuilt: list[tuple[date, date]] = []
+
+    allowed = set((imputed or {}).get("reasons") or ())
+    for s in spells:
+        finish = min(s.end, until) if s.end is not None else until
+        if finish <= s.start:
+            continue
+        window = (s.start, finish)
+        if s.imputed_reason is None:
+            real.append(window)
+        elif imputed is None:
+            continue  # 근거 규칙 없음 → 인정하지 않는다
+        elif str(s.imputed_reason) == "reconstruction":
+            rebuilt.append(window)
+        elif str(s.imputed_reason) in allowed:
+            excused.append(window)
+        # 목록에 없는 사유는 인정하지 않는다 — 조문이 열거한 것만이다
+
+    days = _merged_days(real)
+
+    if excused:
+        cap = int((imputed or {}).get("max_years", 0)) * 365
+        days += min(_merged_days(excused), cap)
+
+    if rebuilt:
+        ratio = Fraction(str((imputed or {}).get("reconstruction_ratio", "1/2")))
+        days += int(_merged_days(rebuilt) * ratio)
+
+    return days // 365
+
+
+def imputed_spec(
+    ruleset: object, *, tax: str, on: date, track: object
+) -> Mapping[str, Any] | None:
+    """해당 세목·시점에 적용되는 인정 규칙. 없으면 None(= 인정하지 않음).
+
+    세목마다 시행일이 다르다 — 종부세 '27.1.1., 양도세 '28.1.1.(개조식 p.22).
+    """
+    res = ruleset.resolve_or_none(
+        "reference.imputed_residence", on=on, track=track, tax=tax
+    )
+    return res.block.payload if res is not None else None
 
 
 def residence_years(
@@ -122,6 +183,7 @@ def residence_years(
     until: date,
     *,
     declared: int | None = None,
+    imputed: Mapping[str, Any] | None = None,
 ) -> int | None:
     """거주기간(년). 거주 이력이 아예 없으면 None — 0년과 구분한다.
 
@@ -133,11 +195,12 @@ def residence_years(
     spells = case.residences_of(person_id, property_id)
     if not spells:
         return None
-    return merged_residence_years(spells, until)
+    return merged_residence_years(spells, until, imputed=imputed)
 
 
 __all__ = [
     "acquisition_date",
+    "imputed_spec",
     "full_years",
     "holding_years",
     "merged_residence_years",

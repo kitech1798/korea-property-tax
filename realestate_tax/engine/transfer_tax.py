@@ -301,7 +301,10 @@ def compute_transfer_tax(
     # 보유기간을 다르게 적으면, 숫자만 바꿔 적어 비과세를 받아내는 길이 열린다.
     # 실측: 보유 1일 양도에 holding_years: 12를 적자 경고 없이 세액 0원이 나왔다.
     derived_hold = periods.holding_years(case, event.person_id, event.property_id, on)
-    derived_live = periods.residence_years(case, event.person_id, event.property_id, on)
+    derived_live = periods.residence_years(
+        case, event.person_id, event.property_id, on,
+        imputed=periods.imputed_spec(ruleset, tax="transfer", on=on, track=track),
+    )
     period_conflicts: list[str] = []
     if event.holding_years is not None and derived_hold is not None and event.holding_years != derived_hold:
         period_conflicts.append(

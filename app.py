@@ -21,6 +21,7 @@ from realestate_tax.domain import (
     AcquisitionCause,
     Household,
     HouseholdId,
+    ImputedResidenceReason,
     InheritedMeta,
     Ownership,
     Person,
@@ -61,6 +62,17 @@ from realestate_tax.rules import RuleSet, Track, default_ruleset_root
 from ui import address as A
 from ui import render as R
 from ui.theme import CSS, DISCLAIMER
+
+_IMPUTED = {
+    "없음": None,
+    "취학(고등학교·대학교)": ImputedResidenceReason.SCHOOLING,
+    "직장 변경·전근": ImputedResidenceReason.JOB_TRANSFER,
+    "질병(1년 이상 치료·요양)": ImputedResidenceReason.ILLNESS,
+    "학교폭력 피해로 전학": ImputedResidenceReason.SCHOOL_VIOLENCE,
+    "해외체류(취학·근무)": ImputedResidenceReason.OVERSEAS,
+    "60세 이상 직계존속 동거봉양": ImputedResidenceReason.ELDER_CARE,
+    "재개발·재건축 공사기간": ImputedResidenceReason.RECONSTRUCTION,
+}
 
 ME = PersonId("me")
 SPOUSE = PersonId("spouse")
@@ -208,6 +220,8 @@ if "houses" not in st.session_state:
             "inheritance_date": date(2024, 1, 1),
             "inherited_share": 100,
             "inherited_same_household": "모름",
+            "imputed_reason": "없음",
+            "imputed_years": 0,
             "rental": False,
             "rental_declared": False,
             "urban": True,
@@ -376,6 +390,25 @@ with tab_input:
                         "경우가 '아니오'입니다. 종합부동산세에는 이 요건이 없습니다."
                     ),
                 )
+            if h["resides"]:
+                # 개편안이 보유공제를 거주공제로 바꾸면서 넣은 완충장치다 —
+                # 이게 없으면 전근·유학 간 사람이 전부 벌을 받는다(개조식 p.22).
+                _keys = list(_IMPUTED)
+                h["imputed_reason"] = f.selectbox(
+                    "못 산 기간이 있나요? (거주로 인정되는 사유)",
+                    _keys,
+                    index=_keys.index(h.get("imputed_reason", "없음")),
+                    key=f"ir{i}",
+                    help=(
+                        "개편안은 부득이한 사유로 비운 기간을 **최장 3년**까지 거주기간으로 "
+                        "인정합니다. 재개발·재건축 공사기간은 **1/2**을 인정합니다. "
+                        "이사하지 않고도 거주공제를 받을 수 있는 길입니다."
+                    ),
+                )
+                if h.get("imputed_reason", "없음") != "없음":
+                    h["imputed_years"] = f.number_input(
+                        "그 기간(년)", 0, 30, int(h.get("imputed_years", 0)), key=f"iy{i}"
+                    )
             h["rental"] = f.checkbox("등록임대주택", h["rental"], key=f"rt{i}")
             if h["rental"]:
                 h["rental_declared"] = f.checkbox(
@@ -471,6 +504,21 @@ def build_case(target_year: int) -> TaxCase:
             years = max(0, h["residence_years"])
             spells.append(
                 ResidenceSpell(ME, pid, start=date(target_year - years, 1, 1))
+            )
+
+        # 부득이한 사유로 못 산 기간 — 개편안이 거주기간으로 인정한다(개조식 p.22).
+        # 실거주 구간과 **별개 구간**으로 넣어야 상한 3년·재건축 1/2이 따로 적용된다.
+        reason_key = _IMPUTED.get(h.get("imputed_reason", "없음"))
+        if reason_key is not None and h.get("imputed_years", 0) > 0:
+            span = int(h["imputed_years"])
+            end = date(target_year - max(0, h["residence_years"]), 1, 1)
+            spells.append(
+                ResidenceSpell(
+                    ME, pid,
+                    start=date(end.year - span, 1, 1),
+                    end=end,
+                    imputed_reason=reason_key,
+                )
             )
 
     return TaxCase(
