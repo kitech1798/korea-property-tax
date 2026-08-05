@@ -48,7 +48,12 @@ from realestate_tax.engine.regions import (
 )
 from realestate_tax.engine.strategy import consult, sell_timing
 from realestate_tax.engine.trace import format_manwon
-from realestate_tax.engine.transfer_tax import TransferEvent, compute_transfer_tax
+from realestate_tax.engine.transfer_tax import (
+    BurdenGift,
+    TransferEvent,
+    compute_burden_gift,
+    compute_transfer_tax,
+)
 from realestate_tax.intake import LOOKUP_GUIDE_KO, Severity, intake
 from realestate_tax.rules import RuleSet, Track, default_ruleset_root
 from ui import address as A
@@ -635,6 +640,77 @@ with tab_sell:
     st.markdown("### 계산 근거")
     st.caption("모든 단계에 산식·대입값·근거 조문이 붙습니다. 손으로 검산하실 수 있습니다.")
     R.trace_tree(detail.trace)
+
+    # ── 부담부증여 ────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### 파는 대신 물려준다면 — 부담부증여")
+    st.caption(
+        "전세보증금이나 대출을 함께 넘기는 증여입니다. **한 사건이 두 세목으로 쪼개집니다** — "
+        "채무액에 해당하는 부분은 **양도**로 보아 주는 사람이 양도소득세를 내고"
+        "(소득세법 §88① 후단), 나머지는 받는 사람이 **증여세**를 냅니다."
+    )
+
+    g1, g2, g3 = st.columns(3)
+    appraised = g1.number_input(
+        "증여재산 평가액(억원)", 0.1, 300.0, 20.0, step=0.5, format="%.1f",
+        key="gift_value",
+        help="상속세및증여세법 §60~66에 따라 평가한 가액입니다.",
+    )
+    debt = g2.number_input(
+        "수증자가 인수하는 채무(억원)", 0.0, 300.0, 8.0, step=0.5, format="%.1f",
+        key="gift_debt",
+        help="전세보증금·근저당 등. 이 금액에 해당하는 부분만 양도로 봅니다.",
+    )
+    g3.metric("양도로 보는 비율", f"{(debt / appraised * 100) if appraised else 0:.1f}%")
+
+    if debt <= 0:
+        R.note(
+            "채무가 없으면 부담부증여가 아닙니다",
+            "인수 채무가 0원이면 순수 증여라 양도소득세가 생기지 않습니다. "
+            "증여세만 검토하시면 됩니다.",
+        )
+    elif debt > appraised:
+        R.note(
+            "채무가 재산보다 큽니다",
+            "인수 채무가 증여재산 평가액을 넘으면 부담부증여로 보지 않습니다. "
+            "금액을 확인해주세요.",
+            "warn",
+        )
+    else:
+        bg = BurdenGift(
+            property_id=PropertyId(f"h{idx}"),
+            person_id=ME,
+            gift_date=date(sell_year, 6, 1),
+            appraised_value=int(appraised * EOK),
+            gift_value=int(appraised * EOK),
+            debt_assumed=int(debt * EOK),
+            acquisition_price=int(buy_price * EOK),
+            necessary_expense=expense * 10_000,
+            holding_years=h["holding_years"],
+            residence_years=h["residence_years"],
+        )
+        bg_result = compute_burden_gift(sell_case, bg, rs, track=track)
+        R.badges(k for k, _ in bg_result.trace.certainty_concerns())
+        R.cards(
+            [
+                ("양도로 보는 가액", format_manwon(bg_result.event.transfer_price),
+                 f"평가액 × 채무 {debt:.1f}억 ÷ 증여가액 {appraised:.1f}억", False),
+                ("양도소득세", format_manwon(bg_result.income_tax.as_int()), "산출세액", False),
+                ("총 부담세액", format_manwon(bg_result.total.as_int()),
+                 "지방소득세 포함 · 증여세 별도", True),
+            ]
+        )
+        R.note(
+            "증여세는 이 계산에 없습니다",
+            f"나머지 {format_manwon(bg.gift_portion)}은 받는 사람이 증여세를 냅니다"
+            "(상속세및증여세법). 이 서비스는 양도소득세만 계산하므로, "
+            "**부담부증여가 유리한지는 두 세목을 합쳐야 판단할 수 있습니다.** "
+            "증여세는 세무 전문가의 확인을 받으세요.",
+            "warn",
+        )
+        R.alternatives(bg_result.trace.all_alternatives(), "부담부증여에서 확인할 항목")
+        with st.expander("부담부증여 계산 근거"):
+            R.trace_tree(bg_result.trace)
 
 
 # ==========================================================================
