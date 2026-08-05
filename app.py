@@ -529,63 +529,112 @@ with tab_sell:
 
     names = [h["name"] for h in st.session_state.houses]
     s1, s2, s3 = st.columns(3)
-    target = s1.selectbox("팔 주택", names)
+    target = s1.selectbox("팔 주택", names, key="sell_target")
     idx = names.index(target)
     sale_price = s2.number_input(
-        "예상 양도가액(억원)", 1.0, 300.0, 30.0, step=0.5, format="%.1f"
+        "예상 양도가액(억원)", 0.1, 300.0, 30.0, step=0.5, format="%.1f", key="sell_price"
     )
     buy_price = s3.number_input(
-        "취득가액(억원)", 0.1, 300.0, 12.0, step=0.5, format="%.1f",
+        "취득가액(억원)", 0.0, 300.0, 12.0, step=0.5, format="%.1f", key="buy_price",
         help="세법상 정본은 **매매계약서**입니다(소득세법 §97①1). "
         "실거래가 공개시스템 값은 신고가액의 공개본이지 세법상 정본이 아닙니다.",
     )
 
-    if sale_price <= buy_price:
-        R.empty("📉", "양도차익이 없습니다", "양도가액이 취득가액보다 크게 설정해주세요.")
-    else:
-        h = st.session_state.houses[idx]
-        base_case = build_case(2027)
-        event = TransferEvent(
-            property_id=PropertyId(f"h{idx}"),
-            person_id=ME,
-            transfer_date=date(2027, 6, 1),
-            transfer_price=int(sale_price * EOK),
-            acquisition_price=int(buy_price * EOK),
-            holding_years=h["holding_years"],
-            residence_years=h["residence_years"],
+    t1, t2 = st.columns(2)
+    sell_year = t1.selectbox(
+        "양도 예정 연도", [2026, 2027, 2028, 2029], index=1, key="sell_year",
+        help="중과 한시완화가 '27~'28에만 있고 '26년 양도분에도 경과조치가 있어 "
+        "연도마다 세액이 크게 다릅니다.",
+    )
+    expense = t2.number_input(
+        "필요경비(만원)", 0, 500_000, 0, step=100, key="sell_expense",
+        help="취득세·법무비·중개보수·자본적지출 등(소득세법 §97①2). "
+        "**빼지 않으면 양도차익이 실제보다 크게 잡혀 세금이 과대계상됩니다.**",
+    )
+
+    h = st.session_state.houses[idx]
+    event = TransferEvent(
+        property_id=PropertyId(f"h{idx}"),
+        person_id=ME,
+        transfer_date=date(sell_year, 6, 1),
+        transfer_price=int(sale_price * EOK),
+        acquisition_price=int(buy_price * EOK),
+        acquisition_date=h["acquired"],
+        necessary_expense=expense * 10_000,
+        holding_years=h["holding_years"],
+        residence_years=h["residence_years"],
+    )
+    sell_case = build_case(sell_year)
+    detail = compute_transfer_tax(sell_case, event, rs, track=track)
+
+    st.markdown(f"### {sell_year}년에 판다면")
+
+    # ★ 세액 명세를 먼저 보여준다. 예전에는 '권장 매도 시점' 카드만 있고
+    #   양도차익·공제·과세표준이 감사추적 안에만 있어서, 사용자는 자기 세금이
+    #   어떻게 나왔는지 보려면 트리를 펼쳐야 했다.
+    R.badges(k for k, _ in detail.trace.certainty_concerns())
+    R.cards(
+        [
+            ("양도차익", format_manwon(detail.gain.as_int()), "양도가액 − 취득가액 − 필요경비", False),
+            ("과세대상 양도차익", format_manwon(detail.taxable_gain.as_int()),
+             "1세대1주택 비과세·고가주택 안분 반영", False),
+            ("장기보유특별공제", format_manwon(detail.long_term_deduction.as_int()),
+             "보유·거주기간별", False),
+            ("과세표준", format_manwon(detail.taxable_base.as_int()), "기본공제 차감 후", False),
+        ]
+    )
+    R.cards(
+        [
+            ("양도소득세", format_manwon(detail.income_tax.as_int()), "산출세액", False),
+            ("개인지방소득세", format_manwon(detail.local_income_tax.as_int()), "산출세액의 10%", False),
+            ("총 부담세액", format_manwon(detail.total.as_int()), f"{sell_year}년 양도 기준", True),
+        ]
+    )
+
+    if detail.gain.as_int() == 0:
+        R.note(
+            "양도차익이 없습니다",
+            "양도가액이 취득가액과 필요경비의 합 이하라 과세할 소득이 없습니다. "
+            "다만 양도소득세는 차익이 없어도 신고 대상입니다(소득세법 §110). "
+            "같은 해에 다른 자산을 팔아 이익이 났다면 이 손실과 통산할 수 있습니다.",
+            "warn",
         )
-        timing = sell_timing(
-            base_case, ME, event, rs, track=track, options=main_options(), growth=growth  # 매도는 2027년 이후만 보므로 원래 트랙
-        )
-        best_idx = timing.points.index(timing.best)
-        R.table(
-            ["매도 연도", "양도세", "보유세 누적", "총비용"],
+
+    R.alternatives(detail.trace.all_alternatives(), "적용되지 않은 항목")
+
+    st.markdown("### 언제 파는 게 나은가")
+    st.caption(
+        "버틸수록 보유세는 쌓이고, 늦게 팔수록 중과가 돌아옵니다. "
+        "두 세목을 합친 **총비용**으로 비교합니다."
+    )
+    timing = sell_timing(
+        build_case(2027), ME, replace(event, transfer_date=date(2027, 6, 1)),
+        rs, track=track, options=main_options(), growth=growth,
+    )
+    best_idx = timing.points.index(timing.best)
+    R.table(
+        ["매도 연도", "양도세", "보유세 누적", "총비용"],
+        [
             [
-                [
-                    f"{p.year}년",
-                    format_manwon(p.transfer_tax),
-                    format_manwon(p.holding_tax_paid),
-                    format_manwon(p.total_cost),
-                ]
-                for p in timing.points
-            ],
-            best_row=best_idx,
-        )
-        R.cards(
-            [
-                ("권장 매도 시점", f"{timing.best.year}년", "총비용이 가장 낮은 해", True),
-                ("최악 대비 차이", format_manwon(timing.spread), f"{timing.worst.year}년 매도 대비", False),
+                f"{p.year}년",
+                format_manwon(p.transfer_tax),
+                format_manwon(p.holding_tax_paid),
+                format_manwon(p.total_cost),
             ]
-        )
+            for p in timing.points
+        ],
+        best_row=best_idx,
+    )
+    R.cards(
+        [
+            ("권장 매도 시점", f"{timing.best.year}년", "총비용이 가장 낮은 해", True),
+            ("최악 대비 차이", format_manwon(timing.spread), f"{timing.worst.year}년 매도 대비", False),
+        ]
+    )
 
-        detail = compute_transfer_tax(
-            base_case, replace(event, transfer_date=date(timing.best.year, 6, 1)), rs, track=track
-        )
-        R.badges(k for k, _ in detail.trace.certainty_concerns())
-        R.alternatives(detail.trace.all_alternatives(), "양도세에서 적용되지 않은 항목")
-
-        st.markdown("#### 계산 근거")
-        R.trace_tree(detail.trace)
+    st.markdown("### 계산 근거")
+    st.caption("모든 단계에 산식·대입값·근거 조문이 붙습니다. 손으로 검산하실 수 있습니다.")
+    R.trace_tree(detail.trace)
 
 
 # ==========================================================================
