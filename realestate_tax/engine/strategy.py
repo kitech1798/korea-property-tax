@@ -735,6 +735,33 @@ def _notes(
     for key, source in r.trace.certainty_concerns():
         notes.append(f"확실성 유의 — {key} (발생 지점: {source})")
 
+    # 지방 세컨드홈 — 엔진이 지역을 판정하지 못하므로 **존재를 알리는 것**까지 한다.
+    # 인구감소지역 목록은 행안부 고시라 기계가 읽을 데이터가 없고, 개편안이 넓히는
+    # 지역은 '27.2월 시행령 개정에서 정해진다(아직 없는 목록이다).
+    # 판정은 못 해도 "이런 특례가 있다"를 모르면 사용자는 영영 못 받는다.
+    second = ruleset.resolve_or_none(
+        "jongbuse.special.second_home", on=case.assessment_date, track=Track.REFORM
+    )
+    if second is not None:
+        caps = second.block.payload.get("caps") or {}
+        cheap = [
+            case.find_property(o.property_id)
+            for o in case.ownerships_of(person_id)
+            if case.find_property(o.property_id).is_house
+            and (case.find_property(o.property_id).price_for(case.year) or None) is not None
+            and case.find_property(o.property_id).price_for(case.year).value <= max(caps.values())
+        ]
+        if cheap and len(case.ownerships_of(person_id)) >= 2:
+            names = ", ".join(p.display_name or str(p.id) for p in cheap)
+            notes.append(
+                f"지방 세컨드홈 특례를 확인해보세요 — {names}이(가) **비수도권(광역시 제외)**의 "
+                "인구감소지역·인구감소관심지역에 있다면 주택 수에서 빠져 1세대1주택자가 될 수 있습니다"
+                "(조세특례제한법 §71의2). 개편안은 대상 지역을 비수도권 전 지역으로 넓히고 "
+                "가액 기준을 올리며 적용기한을 2029년까지 연장합니다. "
+                "다만 **지역 목록은 행정안전부 고시**라 이 엔진이 판정하지 못하고, "
+                "확대되는 지역은 2027년 2월 시행령 개정에서 정해집니다 — 세무서 확인이 필요합니다."
+            )
+
     house_count = len(
         {
             o.property_id
