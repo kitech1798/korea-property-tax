@@ -655,3 +655,33 @@ def test_보유_2년_미만이면_중과_한시완화를_못_받는다(rs: RuleS
     assert "heavy_relief" in alts, "완화를 못 받았다는 사실이 화면에 안 남는다"
     assert "2년 요건에 미달" in alts["heavy_relief"].reason_ko
     assert "heavy_relief" not in {a.key for a in r_long.trace.all_alternatives()}
+
+
+def test_보유기간을_모르면_단기세율을_확정으로_말하지_않는다(rs: RuleSet):
+    """★ 세액은 보수적(높은) 쪽으로 가되, **가정을 판정인 척하면 안 된다.**
+
+    보유기간이 None이면 `held = holding_years or 0`으로 0이 되어 '1년 미만'
+    단일세율 70%를 적용한다. 방향은 맞지만 그건 판정이 아니라 가정이다.
+    사용자는 70%가 확정인 줄 알고 매도를 포기할 수 있다."""
+    case = make_case([("본가", 15 * EOK, SEOUL)], 2026)
+    unknown = TransferEvent(
+        PropertyId("본가"), ME, date(2026, 6, 1), 30 * EOK, 10 * EOK,
+        holding_years=None, residence_years=10,
+    )
+    r = compute_transfer_tax(case, unknown, rs)
+
+    alts = {a.key: a for a in r.trace.all_alternatives()}
+    assert "short_term_rate_assumed" in alts, "가정했다는 사실이 화면에 없다"
+    assert alts["short_term_rate_assumed"].actionable
+    assert "취득일" in alts["short_term_rate_assumed"].reason_ko
+    assert "판단 필요" in dict(r.trace.certainty_concerns())
+
+
+def test_보유기간을_알면_가정_안내가_뜨지_않는다(rs: RuleSet):
+    case = make_case([("본가", 15 * EOK, SEOUL)], 2026)
+    known = TransferEvent(
+        PropertyId("본가"), ME, date(2026, 6, 1), 30 * EOK, 10 * EOK,
+        holding_years=0, residence_years=10,
+    )
+    r = compute_transfer_tax(case, known, rs)
+    assert "short_term_rate_assumed" not in {a.key for a in r.trace.all_alternatives()}

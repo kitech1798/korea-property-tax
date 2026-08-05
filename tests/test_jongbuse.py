@@ -646,3 +646,36 @@ def test_과세기준일에_걸치지_않는_거주는_거주가_아니다(rs: R
     n = r.trace.find("jb.06.basic_deduction")
     assert n.output.as_int() == 900_000_000
     assert "과세기준일에 걸치지 않음" in n.branch.taken
+
+
+def test_공시가격을_모르면_과세대상_아님으로_확정하지_않는다(rs: RuleSet):
+    """★ **모르는 것을 0으로 읽고 단언하는 것**이 이 프로젝트가 없애려는 실패다.
+
+    개편안 과세문턱(§7①)을 넣은 뒤, 공시가격이 없는 케이스에서
+    0 ≤ 14억이 되어 "과세대상 아님 → 0원"으로 확정되고 '미상' 배지가 사라졌다.
+    현행법 트랙에는 문턱이 없어 이 경로를 안 타는 바람에 한동안 못 봤다."""
+    hh = HouseholdId("hh")
+    p = Person(id=PersonId("p0"), household_id=hh, birth_date=date(1970, 1, 1))
+    prop = Property(
+        id=PropertyId("h0"), kind=PropertyKind.APARTMENT, legal_dong_code=SEOUL,
+        published_prices=(),  # 공시가격 미입력
+    )
+    case = TaxCase(
+        year=2027, persons=(p,),
+        households=(Household(id=hh, member_ids=(p.id,)),),
+        properties=(prop,), ownerships=(Ownership(p.id, prop.id),),
+    )
+    r = run(rs, case, track=Track.REFORM, options=JongbuseOptions(holding_years=10))
+
+    assert "미상" in dict(r.trace.certainty_concerns()), "모르는데 0원이라고 단언했다"
+    # 문턱 판정 자체를 하지 않았어야 한다 — 모르는 값을 비교하면 안 된다
+    assert r.trace.find("jb.05b.taxable_threshold") is None
+
+
+def test_공시가격을_알면_문턱_판정을_한다(rs: RuleSet):
+    """방어 로직이 정상 경로를 막으면 안 된다."""
+    case = one_house_case(year=2027, price=1_200_000_000)
+    r = run(rs, case, track=Track.REFORM, options=JongbuseOptions(holding_years=10))
+    assert r.trace.find("jb.05b.taxable_threshold") is not None
+    assert r.total.as_int() == 0
+    assert "미상" not in dict(r.trace.certainty_concerns())

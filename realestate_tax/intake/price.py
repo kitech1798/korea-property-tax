@@ -76,23 +76,51 @@ def parse_won(text: str) -> Won:
 
     "3억 2,400만" 같은 복합 표기를 받는다. 사용자가 알리미 화면에서 본 그대로
     붙여넣을 수 있어야 입력 마찰이 줄고, 그래야 오타가 준다.
+
+    ★ 모호하면 **추측하지 않고 거부한다**(2026-08-05 경계 훑기에서 발견).
+      예전에는 조용히 읽어내려다 이렇게 틀렸다:
+        "15억5000" → 1,500,005,000   사용자는 15억 5,000만을 뜻했는데 5천원이 됐다
+        "-5억"     → 500,000,000     마이너스를 먹고 양수가 됐다
+        "1.5e9"    → 10              'e'를 무시하고 1 + 9로 읽었다
+      셋 다 **알림 없이** 통과했다. 세금 도구에서 숫자를 조용히 잘못 읽는 것이
+      가장 나쁜 실패다 — 사용자는 자기가 넣은 값이라고 믿는다.
     """
-    cleaned = str(text).replace("원", "").strip()
+    raw = str(text)
+    cleaned = raw.replace("원", "").strip()
     if not cleaned:
         raise PriceParseError("금액이 비어 있다")
 
-    total = 0
-    matched_any = False
-    for number, unit in _UNIT_PATTERN.findall(cleaned):
+    if "-" in cleaned or "−" in cleaned:
+        raise PriceParseError(f"금액에 음수 부호가 있다: {raw!r}")
+
+    groups = _UNIT_PATTERN.findall(cleaned)
+    parsed: list[tuple[str, str | None]] = []
+    for number, unit in groups:
         digits = number.replace(",", "")
         if not digits or digits == ".":
             continue
-        matched_any = True
-        total += int(float(digits) * _UNIT_VALUE[unit or None])
+        parsed.append((digits, unit or None))
 
-    if not matched_any:
-        raise PriceParseError(f"금액으로 읽을 수 없다: {text!r}")
-    return total
+    if not parsed:
+        raise PriceParseError(f"금액으로 읽을 수 없다: {raw!r}")
+
+    # 우리가 읽어낸 조각을 지우고 남는 게 있으면 **읽지 못한 글자**다.
+    # 남은 걸 무시하면 '1.5e9'의 'e'처럼 뜻이 통째로 바뀌는 입력을 통과시킨다.
+    leftover = _UNIT_PATTERN.sub("", cleaned).strip()
+    if leftover:
+        raise PriceParseError(f"금액으로 읽을 수 없는 글자가 있다: {leftover!r} ({raw!r})")
+
+    # 단위 없는 숫자는 **혼자일 때만** 허용한다.
+    #   "1,500,000,000"  → 그대로 원
+    #   "15억 5,000만"    → 둘 다 단위가 있으니 명확
+    #   "15억5000"        → 5000이 만인지 천인지 원인지 알 수 없다 → 거부
+    if len(parsed) > 1 and any(unit is None for _, unit in parsed):
+        raise PriceParseError(
+            f"단위를 붙여주세요: {raw!r}\n"
+            "  예) 15억 5,000만 / 1,550,000,000"
+        )
+
+    return sum(int(float(d) * _UNIT_VALUE[u]) for d, u in parsed)
 
 
 def deduction_boundaries(
