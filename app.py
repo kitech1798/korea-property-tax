@@ -90,9 +90,37 @@ def _bootstrap_keys() -> None:
         try:
             value = st.secrets[name]
         except Exception:  # secrets.toml이 없으면 그냥 없는 것이다
-            continue
+            value = _secret_near(name)
         if value:
-            os.environ[name] = str(value)
+            os.environ[name] = str(value).strip()
+
+
+def _secret_near(name: str) -> str | None:
+    """이름이 **거의** 맞는 비밀값을 찾아 알려준다.
+
+    ★ 실제로 당한 함정(2026-08-05): PowerShell 5.1의 `-Encoding utf8`이 BOM을 붙여
+      `secrets.toml` 첫 줄이 `﻿JUSO_CONFM_KEY`가 됐다. TOML 파서는 BOM을 키
+      이름의 일부로 읽으므로 **첫 번째 키만 조용히 사라진다.** 두 번째 키는 멀쩡해서
+      "왜 하나만 안 되지"로 한참을 헤매게 된다.
+
+      값이 없는 것과 이름이 어긋난 것은 사용자가 할 일이 완전히 다르다. 그래서
+      "없다"고만 하지 않고 **어긋난 이름을 그대로 보여준다.** 한 줄이면 끝날 문제를
+      30분짜리 미스터리로 만들지 않는다.
+    """
+    try:
+        available = list(st.secrets.keys())
+    except Exception:
+        return None
+    for key in available:
+        if key != name and key.strip().lstrip("﻿") == name:
+            st.warning(
+                f"`{name}` 이름이 어긋나 있습니다 — Secrets에 `{key!r}`로 들어가 있습니다. "
+                "앞에 보이지 않는 문자(BOM)나 공백이 붙은 것이니, 해당 줄을 지우고 "
+                f"`{name} = \"...\"` 를 다시 입력해주세요.",
+                icon="⚠️",
+            )
+            return st.secrets[key]
+    return None
 
 
 _bootstrap_keys()
