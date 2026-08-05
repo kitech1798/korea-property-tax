@@ -383,12 +383,32 @@ def _move_in_strategy(
     2026 개편안의 핵심이다. 기본공제가 거주 14억 / 비거주 9억으로 갈리고,
     보유공제가 거주공제로 전환되므로 '살지 않는 집'의 세부담이 크게 오른다.
     이미 거주 중이면 제안하지 않는다.
-    """
-    if options.resides_in_main_house:
-        return []
 
+    ★ 가드가 **옵션만** 봐서 한 번도 발동하지 않았다(2026-08-05).
+      거주 여부는 `ResidenceSpell`에서 도출되므로 `options.resides_in_main_house`는
+      보통 None이다. 그래서 이미 살고 있는 사람에게도 "실거주 전환"이 제시됐고,
+      기준선이 이미 거주를 반영한 탓에 **"손해 557만원"**이라는 헛소리가 나왔다.
+
+      모델에 있는 사실을 엔진이 안 읽는 같은 실수의 다섯 번째다
+      (거주 여부 → 거주기간 → 취득일 → Election → 여기).
+      **판정 결과를 값으로 받아** 확인한다 — 계산을 한 번 더 돌리는 값보다
+      틀린 조언을 띄우는 비용이 크다.
+    """
     reform_years = tuple(y for y in years if y > 2026)
     if not reform_years:
+        return []
+
+    if options.resides_in_main_house is None:
+        probe = compute_jongbuse(
+            project_case(case, reform_years[0], growth=growth),
+            person_id,
+            ruleset,
+            track=Track.REFORM,
+            options=options,
+        )
+        if probe.resides:
+            return []
+    elif options.resides_in_main_house:
         return []
 
     baseline = _sum_reform_years(case, person_id, ruleset, options, years, growth)
@@ -410,7 +430,7 @@ def _move_in_strategy(
                 "기본공제가 9억원에서 14억원으로 올라갑니다. 거주기간이 쌓이면 "
                 "거주공제(5년 20% / 10년 40% / 15년 50%)도 함께 붙습니다."
             ),
-            basis_ko="종합부동산세법 §8① (개정안), §9⑦ (개정안)",
+            basis_ko="종합부동산세법 §8① (개정안), §9⑧ (개정안)",
             baseline=baseline,
             alternative=alternative,
             years=reform_years,

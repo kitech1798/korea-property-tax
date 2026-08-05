@@ -274,3 +274,79 @@ def test_입력이_부족하면_무엇을_주면_정확해지는지_알려준다
 def test_확실성_우려가_상담_노트에_전부_올라온다(rs: RuleSet):
     notes = " ".join(consult(solo_case(), ME, rs, options=OPTS).notes_ko)
     assert "확실성 유의" in notes
+
+
+def test_이미_거주_중이면_실거주_전환을_제안하지_않는다(rs: RuleSet):
+    """★ 가드가 **옵션만** 봐서 한 번도 발동하지 않았다(2026-08-05).
+
+    거주 여부는 `ResidenceSpell`에서 도출되므로 `options.resides_in_main_house`는
+    보통 None이다. 그래서 이미 살고 있는 사람에게도 "실거주 전환"이 제시됐고,
+    기준선이 이미 거주를 반영한 탓에 **"손해 557만원"**이라는 헛소리가 나왔다.
+
+    모델에 있는 사실을 엔진이 안 읽는 같은 실수의 다섯 번째다
+    (거주 여부 → 거주기간 → 취득일 → Election → 여기).
+    """
+    from datetime import date
+
+    from realestate_tax.domain import (
+        Household, HouseholdId, Ownership, Person, PersonId,
+        PriceFact, Property, PropertyId, PropertyKind, ResidenceSpell, TaxCase,
+    )
+    from realestate_tax.engine.strategy import consult
+
+    me = PersonId("me")
+    h = PropertyId("h")
+
+    def build(resides: bool) -> TaxCase:
+        return TaxCase(
+            year=2026,
+            persons=(Person(id=me, birth_date=date(1958, 4, 2), household_id=HouseholdId("hh")),),
+            households=(Household(id=HouseholdId("hh"), member_ids=(me,)),),
+            properties=(
+                Property(id=h, kind=PropertyKind.APARTMENT, legal_dong_code="1168010100",
+                         published_prices=(PriceFact(2026, 2_500_000_000),)),
+            ),
+            ownerships=(Ownership(person_id=me, property_id=h, acquired_on=date(2012, 5, 1)),),
+            residences=(
+                (ResidenceSpell(person_id=me, property_id=h, start=date(2012, 5, 1)),)
+                if resides else ()
+            ),
+        )
+
+    living = consult(build(True), me, rs)
+    assert not [s for s in living.strategies if s.key == "move_in"], (
+        "이미 거주 중인데 실거주 전환을 제안했다"
+    )
+
+    # 반대편도 함께 고정한다 — 가드를 세게 걸다 정상 경로까지 막으면 안 된다.
+    away = consult(build(False), me, rs)
+    move_in = [s for s in away.strategies if s.key == "move_in"]
+    assert move_in and move_in[0].saving > 0, "비거주자에게 실거주 전환이 안 나온다"
+
+
+def test_조언에_틀린_조항을_적지_않는다(rs: RuleSet):
+    """거주공제의 근거는 §9⑧이다. §9⑦은 상속·일시적2주택이 있을 때의
+    **연령** 공제 특칙으로 전혀 다른 규범이다 — 룰셋에서 고친 것과 같은 오기가
+    조언 문구에도 박혀 있었다."""
+    from datetime import date
+
+    from realestate_tax.domain import (
+        Household, HouseholdId, Ownership, Person, PersonId,
+        PriceFact, Property, PropertyId, PropertyKind, TaxCase,
+    )
+    from realestate_tax.engine.strategy import consult
+
+    me = PersonId("me")
+    h = PropertyId("h")
+    case = TaxCase(
+        year=2026,
+        persons=(Person(id=me, birth_date=date(1958, 4, 2), household_id=HouseholdId("hh")),),
+        households=(Household(id=HouseholdId("hh"), member_ids=(me,)),),
+        properties=(
+            Property(id=h, kind=PropertyKind.APARTMENT, legal_dong_code="1168010100",
+                     published_prices=(PriceFact(2026, 2_500_000_000),)),
+        ),
+        ownerships=(Ownership(person_id=me, property_id=h, acquired_on=date(2012, 5, 1)),),
+    )
+    for s in consult(case, me, rs).strategies:
+        assert "§9⑦" not in s.basis_ko, f"{s.key}: §9⑦은 연령공제 특칙이다"
