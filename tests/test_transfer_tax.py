@@ -662,8 +662,18 @@ def test_보유기간을_모르면_단기세율을_확정으로_말하지_않는
 
     보유기간이 None이면 `held = holding_years or 0`으로 0이 되어 '1년 미만'
     단일세율 70%를 적용한다. 방향은 맞지만 그건 판정이 아니라 가정이다.
-    사용자는 70%가 확정인 줄 알고 매도를 포기할 수 있다."""
+    사용자는 70%가 확정인 줄 알고 매도를 포기할 수 있다.
+
+    ★ 2026-08-05: '모른다'의 정의가 바뀌었다. 예전에는 `holding_years=None`만 주면
+      모르는 것이 됐는데, 그건 엔진이 사건에 적힌 취득일을 **무시했기 때문**이었다
+      (SIM-06). 이제는 취득일에서 보유기간을 도출하므로, 진짜로 모르려면
+      소유 이력에도 취득일이 없어야 한다. 이 테스트는 그 상태를 만든다."""
     case = make_case([("본가", 15 * EOK, SEOUL)], 2026)
+    # 취득일을 지운다 — 등기부를 못 찾았거나 상속 경위가 불분명한 실제 상황
+    case = replace(
+        case,
+        ownerships=(Ownership(ME, PropertyId("본가"), acquired_on=None),),
+    )
     unknown = TransferEvent(
         PropertyId("본가"), ME, date(2026, 6, 1), 30 * EOK, 10 * EOK,
         holding_years=None, residence_years=10,

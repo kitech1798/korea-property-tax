@@ -1,0 +1,457 @@
+# 2회차 · 앵글: 장기보유특별공제 표1·표2
+#
+# 1회차에서는 취득일이 안 읽혀 보유기간이 None이었고, 장특공제가 전부 0이었다.
+# 아래 10건은 그 아래 분기 — 표1 연 2% 계단, 표2 보유4%+거주4%, 개편안 3단계,
+# 중과 시 배제 — 를 처음으로 밟게 하는 것이 목적이다.
+#
+# 보유·거주기간은 원칙적으로 직접 쓰지 않는다. 취득일과 거주 이력만 준다.
+# 예외 1건(ltd-table-03)만 holding_years를 일부러 모순되게 명시해
+# "명시가 도출을 이기는가"를 관측한다.
+
+id: ltd-table-01
+label: 표1 하한 경계 — 보유 3년에서 하루 모자란 양도(비조정 2주택)
+origin: ltd-table-agent
+intent: |
+  표1은 보유 3년부터 6%로 시작한다. 3년에 딱 하루 모자란 보유를 주어
+  공제가 0으로 끊기는지 본다. 초일산입/불산입 관례가 어느 쪽인지도 여기서 드러난다.
+  조정대상지역이 아닌 곳에 두어 중과가 장특공제를 가리지 않게 격리했다.
+expectation: |
+  장기보유특별공제가 붙지 않는다(3년 미만). 보유 2년은 넘겼으므로 단기 단일세율이 아니라
+  기본세율 구간이어야 한다. 공제 0과 70% 단일세율이 동시에 나오면 1회차 단락의 잔재다.
+tags: [장특공제, 표1, 경계, 3년]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 갑, birth: 1975-05-05, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan1
+    name: 해운대 아파트
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    prices: {2027: 700_000_000}
+  - id: daegu1
+    name: 대구 아파트
+    kind: apartment
+    dong: "2711010100"
+    urban: true
+    prices: {2027: 300_000_000}
+ownerships:
+  - {person: p1, property: busan1, share: 1, acquired: 2025-01-01, cause: purchase}
+  - {person: p1, property: daegu1, share: 1, acquired: 2013-02-10, cause: purchase}
+transfer:
+  property: busan1
+  person: p1
+  date: 2027-12-31
+  price: 900_000_000
+  acquisition_price: 600_000_000
+  acquisition_date: 2025-01-01
+  necessary_expense: 10_000_000
+  share: 1
+
+---
+
+id: ltd-table-02
+label: 표1 하한 경계 — 01과 하루 차이로 3년을 넘긴 양도
+origin: ltd-table-agent
+intent: |
+  ltd-table-01과 취득일이 같고 양도일만 하루 뒤다. 이 하루로 표1 첫 계단(6%)이
+  켜져야 한다. 01과 02가 같은 공제율이면 경계 판정이 하루를 못 본다는 뜻이다.
+expectation: |
+  표1 최소 구간(보유 3년)의 공제가 켜진다. 01보다 과세표준이 낮아진다.
+tags: [장특공제, 표1, 경계, 3년, 대조군]
+year: 2028
+subject: p1
+persons:
+  - {id: p1, name: 갑, birth: 1975-05-05, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan1
+    name: 해운대 아파트
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    prices: {2028: 700_000_000}
+  - id: daegu1
+    name: 대구 아파트
+    kind: apartment
+    dong: "2711010100"
+    urban: true
+    prices: {2028: 300_000_000}
+ownerships:
+  - {person: p1, property: busan1, share: 1, acquired: 2025-01-01, cause: purchase}
+  - {person: p1, property: daegu1, share: 1, acquired: 2013-02-10, cause: purchase}
+transfer:
+  property: busan1
+  person: p1
+  date: 2028-01-01
+  price: 900_000_000
+  acquisition_price: 600_000_000
+  acquisition_date: 2025-01-01
+  necessary_expense: 10_000_000
+  share: 1
+
+---
+
+id: ltd-table-03
+label: 표1 중간 계단 — 보유 10년인데 holding_years를 3으로 명시(모순)
+origin: ltd-table-agent
+intent: |
+  취득일에서 도출하면 보유 10년(표1 20%)이지만, holding_years에 3을 박아 넣었다.
+  명시가 도출을 이기는지, 도출이 명시를 덮는지, 아니면 둘이 섞여 모순 상태로
+  계산되는지를 본다. 어느 쪽이든 계약이 문서화돼 있어야 한다.
+expectation: |
+  공제율은 6%(명시 3년) 또는 20%(도출 10년) 중 하나로 일관되게 나와야 한다.
+  세율 판정은 10년으로 하면서 공제만 3년으로 하는 식의 혼선이 나오면 우선순위 규칙이 없는 것이다.
+tags: [장특공제, 표1, 모순입력, 명시vs도출]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 을, birth: 1975-05-05, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: cheonan1
+    name: 천안 아파트
+    kind: apartment
+    dong: "4413010100"
+    urban: true
+    prices: {2027: 500_000_000}
+  - id: mokpo1
+    name: 목포 아파트
+    kind: apartment
+    dong: "4611010100"
+    urban: true
+    prices: {2027: 200_000_000}
+ownerships:
+  - {person: p1, property: cheonan1, share: 1, acquired: 2017-05-01, cause: purchase}
+  - {person: p1, property: mokpo1, share: 1, acquired: 2011-09-09, cause: purchase}
+transfer:
+  property: cheonan1
+  person: p1
+  date: 2027-05-02
+  price: 1_100_000_000
+  acquisition_price: 400_000_000
+  acquisition_date: 2017-05-01
+  necessary_expense: 15_000_000
+  share: 1
+  holding_years: 3
+
+---
+
+id: ltd-table-04
+label: 표1 상한 도달 — 보유 15년 1일 · transfer에 취득일을 주지 않고 소유 이력에서만 도출
+origin: ltd-table-agent
+intent: |
+  표1은 15년에서 30%로 상한에 닿는다. 동시에 transfer.acquisition_date를 비워
+  ownerships[].acquired만으로 보유기간이 도출되는지 확인한다.
+  1회차 버그의 진원지가 정확히 이 경로다.
+expectation: |
+  보유 15년으로 인식되어 표1 상한(30%)에 도달한다. 취득일 도출이 실패하면
+  공제 0 또는 판정 불가가 나올 것이고, 그것이 곧 회귀다.
+tags: [장특공제, 표1, 상한, 취득일도출]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 병, birth: 1975-05-05, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: jeju1
+    name: 서귀포 주택
+    kind: detached
+    dong: "5013010100"
+    urban: false
+    prices: {2027: 600_000_000}
+  - id: daegu1
+    name: 대구 아파트
+    kind: apartment
+    dong: "2711010100"
+    urban: true
+    prices: {2027: 350_000_000}
+ownerships:
+  - {person: p1, property: jeju1, share: 1, acquired: 2012-05-01, cause: purchase}
+  - {person: p1, property: daegu1, share: 1, acquired: 2020-01-20, cause: purchase}
+transfer:
+  property: jeju1
+  person: p1
+  date: 2027-05-02
+  price: 1_400_000_000
+  acquisition_price: 500_000_000
+  necessary_expense: 20_000_000
+  share: 1
+
+---
+
+id: ltd-table-05
+label: 표1 상한 초과 — 보유 16년 · 거주기간이 보유기간보다 긴 모순(취득 3년 전부터 거주)
+origin: ltd-table-agent
+intent: |
+  ① 15년을 넘겨도 표1이 30%에서 멈추는지(상한 초과 시 32%로 새지 않는지).
+  ② 취득일보다 앞선 거주 시작일(전세로 살던 집을 매수한 형태)을 주어
+     거주기간이 보유기간을 초과하는 모순을 만든다. 2주택이므로 표2로 넘어가면 안 된다.
+expectation: |
+  표1 30%에서 멈춘다. 2주택이므로 거주 이력이 아무리 길어도 표2(보유+거주)로
+  승격되면 안 된다. 거주기간이 보유기간보다 크게 잡히거나 공제가 30%를 넘으면 결함이다.
+tags: [장특공제, 표1, 상한, 모순입력, 거주초과]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 정, birth: 1975-05-05, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan1
+    name: 해운대 아파트
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    prices: {2027: 800_000_000}
+  - id: mokpo1
+    name: 목포 아파트
+    kind: apartment
+    dong: "4611010100"
+    urban: true
+    prices: {2027: 250_000_000}
+ownerships:
+  - {person: p1, property: busan1, share: 1, acquired: 2011-05-01, cause: purchase}
+  - {person: p1, property: mokpo1, share: 1, acquired: 2016-08-08, cause: purchase}
+residences:
+  - {person: p1, property: busan1, start: 2008-01-01}
+transfer:
+  property: busan1
+  person: p1
+  date: 2027-05-02
+  price: 1_600_000_000
+  acquisition_price: 400_000_000
+  acquisition_date: 2011-05-01
+  necessary_expense: 25_000_000
+  share: 1
+
+---
+
+id: ltd-table-06
+label: 표2 탈락 경계 — 거주가 두 토막이고 합쳐서 2년에 하루 모자람(1주택 고가주택)
+origin: ltd-table-agent
+intent: |
+  표2는 1세대1주택 + 거주 2년 이상에서만 열린다. 거주를 연속 한 덩어리가 아니라
+  두 토막(2015-03-01~2016-02-28, 2020-06-01~2021-05-30)으로 주고 합계를 2년 −1일에 맞췄다.
+  ① 토막 거주를 합산하는가 ② 합산해도 하루가 모자라면 표1로 떨어지는가.
+expectation: |
+  거주 2년 요건 미달로 표2가 아니라 표1(보유 12년 → 24%)이 적용된다.
+  표2가 열려 60%대 공제가 나오면 경계가 하루를 못 본 것이고,
+  거주 토막을 하나만 세어 1년으로 잡아도 결함이다(우연히 결론은 같아진다).
+tags: [장특공제, 표2, 경계, 거주2년, 토막거주, 고가주택]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 무, birth: 1975-05-05, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan1
+    name: 해운대 아파트
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    area_m2: 84.9
+    prices: {2027: 1_300_000_000}
+ownerships:
+  - {person: p1, property: busan1, share: 1, acquired: 2015-03-01, cause: purchase}
+residences:
+  - {person: p1, property: busan1, start: 2015-03-01, end: 2016-02-28}
+  - {person: p1, property: busan1, start: 2020-06-01, end: 2021-05-30}
+transfer:
+  property: busan1
+  person: p1
+  date: 2027-03-02
+  price: 2_000_000_000
+  acquisition_price: 800_000_000
+  acquisition_date: 2015-03-01
+  necessary_expense: 20_000_000
+  share: 1
+
+---
+
+id: ltd-table-07
+label: 개편 3단계 대조군 ① 2027년 양도 — 1주택 고가 · 보유 5년 · 거주 5년
+origin: ltd-table-agent
+intent: |
+  07·08·09는 취득일을 한 해씩 밀어 보유·거주기간(각 5년)과 금액을 모두 같게 맞춘
+  3점 대조군이다. 달라지는 것은 양도 연도뿐이다.
+  07은 개편안이 아직 현행을 유지하는 구간(보유 4% + 거주 4%)을 밟는다.
+  공제율을 5년으로 잡은 것은 의도적이다 — 10년으로 하면 세 해가 모두 상한 80%에
+  눌려 3단계 차이가 관측되지 않는다.
+expectation: |
+  표2가 열린다(보유 5년 + 거주 5년). 현행 트랙과 개편 트랙의 공제율이 같아야 한다
+  — 2027년은 개편 3단계 중 현행유지 구간이다. 두 트랙이 갈리면 시행 시기 판정이 이르다.
+tags: [장특공제, 표2, 개편3단계, 대조군, 2027]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 기, birth: 1975-05-05, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan1
+    name: 해운대 아파트
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    area_m2: 101.2
+    prices: {2027: 1_500_000_000}
+ownerships:
+  - {person: p1, property: busan1, share: 1, acquired: 2022-06-01, cause: purchase}
+residences:
+  - {person: p1, property: busan1, start: 2022-06-01}
+transfer:
+  property: busan1
+  person: p1
+  date: 2027-06-15
+  price: 2_500_000_000
+  acquisition_price: 1_000_000_000
+  acquisition_date: 2022-06-01
+  necessary_expense: 20_000_000
+  share: 1
+
+---
+
+id: ltd-table-08
+label: 개편 3단계 대조군 ② 2028년 양도 — 07과 사실관계 동일(보유 5년 · 거주 5년)
+origin: ltd-table-agent
+intent: |
+  07에서 취득일과 거주 시작일만 1년씩 밀었다. 보유 5년·거주 5년·금액 전부 동일.
+  2028년부터 개편안은 보유 2% + 거주 6%로 배분이 바뀐다.
+  같은 총 80% 상한 아래에서도 5년 구간에서는 배분 차이가 숫자로 드러나야 한다.
+expectation: |
+  현행 트랙(보유4%+거주4%)과 개편 트랙(보유2%+거주6%)의 공제율이 갈린다.
+  거주를 채운 사람이므로 개편 트랙 공제가 현행보다 높거나 같아야 하고,
+  07의 개편 트랙과도 달라야 한다. 07·08·09 개편 트랙이 셋 다 같으면 시행 시기가 안 걸린 것이다.
+tags: [장특공제, 표2, 개편3단계, 대조군, 2028]
+year: 2028
+subject: p1
+persons:
+  - {id: p1, name: 기, birth: 1975-05-05, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan1
+    name: 해운대 아파트
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    area_m2: 101.2
+    prices: {2028: 1_500_000_000}
+ownerships:
+  - {person: p1, property: busan1, share: 1, acquired: 2023-06-01, cause: purchase}
+residences:
+  - {person: p1, property: busan1, start: 2023-06-01}
+transfer:
+  property: busan1
+  person: p1
+  date: 2028-06-15
+  price: 2_500_000_000
+  acquisition_price: 1_000_000_000
+  acquisition_date: 2023-06-01
+  necessary_expense: 20_000_000
+  share: 1
+
+---
+
+id: ltd-table-09
+label: 개편 3단계 대조군 ③ 2029년 양도 — 07·08과 사실관계 동일(보유 5년 · 거주 5년)
+origin: ltd-table-agent
+intent: |
+  3점 대조군의 마지막. 2029년부터 거주 가산이 8%로 올라가는 구간을 밟는다.
+  07 → 08 → 09로 갈수록 개편 트랙 공제율이 단조 증가해야 한다(거주를 꽉 채운 납세자이므로).
+expectation: |
+  개편 트랙 공제율이 08보다 높다. 08과 같거나 낮으면 3단계 중 마지막 계단이 안 걸린 것이다.
+  현행 트랙은 07·08·09 셋이 모두 동일해야 한다(현행법은 연도에 따라 변하지 않는다).
+tags: [장특공제, 표2, 개편3단계, 대조군, 2029]
+year: 2029
+subject: p1
+persons:
+  - {id: p1, name: 기, birth: 1975-05-05, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan1
+    name: 해운대 아파트
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    area_m2: 101.2
+    prices: {2029: 1_500_000_000}
+ownerships:
+  - {person: p1, property: busan1, share: 1, acquired: 2024-06-01, cause: purchase}
+residences:
+  - {person: p1, property: busan1, start: 2024-06-01}
+transfer:
+  property: busan1
+  person: p1
+  date: 2029-06-15
+  price: 2_500_000_000
+  acquisition_price: 1_000_000_000
+  acquisition_date: 2024-06-01
+  necessary_expense: 20_000_000
+  share: 1
+
+---
+
+id: ltd-table-10
+label: 중과 × 장특공제 — 조정대상지역 3주택 · 보유 20년짜리를 양도
+origin: ltd-table-agent
+intent: |
+  다주택 중과가 적용되는 기간에는 장특공제가 배제된다. 20년을 보유해
+  표1 상한(30%)을 훌쩍 넘긴 물건을 조정대상지역 3주택 상태에서 양도시켜
+  "긴 보유"와 "중과 배제"가 충돌할 때 어느 쪽이 이기는지 본다.
+  중과 한시완화가 살아 있으면 반대로 중과가 빠지고 공제 30%가 붙어야 한다 —
+  즉 이 한 건이 완화 시행 여부를 판별하는 리트머스다.
+expectation: |
+  둘 중 하나로 일관돼야 한다. (a) 중과 적용 → 장특공제 0 + 중과세율,
+  (b) 한시완화로 중과 배제 → 장특공제 30% + 기본세율.
+  중과세율을 매기면서 장특공제도 30% 태우면 배제 규칙이 안 걸린 것이다.
+  취득일(2007년)이 조정지역 이력 수집 시작(2025-10-16)보다 앞서므로
+  "취득 당시 조정지역이었나"는 판정 불가가 정상이다 — 양도 시점 판정만 유효하다.
+tags: [장특공제, 중과, 배제, 조정지역, 다주택]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 경, birth: 1975-05-05, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: gangnam
+    name: 역삼 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2027: 2_200_000_000}
+  - id: jamsil
+    name: 잠실 아파트
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2027: 1_800_000_000}
+  - id: bundang
+    name: 분당 아파트
+    kind: apartment
+    dong: "4113510100"
+    urban: true
+    prices: {2027: 1_100_000_000}
+ownerships:
+  - {person: p1, property: gangnam, share: 1, acquired: 2007-05-01, cause: purchase}
+  - {person: p1, property: jamsil, share: 1, acquired: 2014-03-15, cause: purchase}
+  - {person: p1, property: bundang, share: 1, acquired: 2019-11-20, cause: purchase}
+transfer:
+  property: gangnam
+  person: p1
+  date: 2027-05-02
+  price: 3_200_000_000
+  acquisition_price: 700_000_000
+  acquisition_date: 2007-05-01
+  necessary_expense: 40_000_000
+  share: 1

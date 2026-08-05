@@ -25,6 +25,7 @@ from typing import Any, Mapping
 
 from ..domain.certainty import Certainty, DeterminationQuality
 from ..domain.models import (
+    AcquisitionCause,
     PersonId,
     PropertyId,
     TaxCase,
@@ -32,6 +33,7 @@ from ..domain.models import (
 )
 from ..rules.resolver import RuleSet
 from ..rules.schema import Track
+from . import periods
 from .regions import UNKNOWN, YES, check_regulated
 from .special_houses import assess
 from .trace import (
@@ -281,10 +283,121 @@ def compute_transfer_tax(
     subject = SubjectRef(SubjectType.PROPERTY, str(prop.id), prop.display_name or str(prop.id))
     children: list[TraceNode] = []
 
+    # ── 00. 기간 확정 — **여기 한 곳에서** 사실로부터 뽑는다 ────────
+    #
+    # ★ 취득일이 이벤트에도 소유 이력에도 적혀 있는데 보유기간을 None으로 두고 있었다
+    #   (SIM-06, 2026-08-05 시뮬레이션). 결과가 참혹했다:
+    #     · tr.03a 비과세 → "보유기간 미상"으로 요건 미충족
+    #     · tr.05 장특공제 → "보유 0년 < 3년"으로 0원
+    #     · tr.09 세율 → 보유 0년이라 **1년 미만 70% 단일세율**
+    #   즉 10년 보유·10년 거주 1주택자가 12억에 팔아도 **차익 전액에 70%**가 붙었다.
+    #   골든 테스트가 못 잡은 이유는 SIM-01과 같다 — 테스트가 기간을 손으로 먹여줬다.
+    #
+    #   아래 20여 곳이 event.holding_years를 직접 읽으므로, 입구에서 한 번 채워
+    #   전 구간이 같은 값을 보게 한다. 호출부마다 도출하게 하면 한 곳을 빠뜨린다.
+    #
+    # 명시값은 도출값을 이긴다(배우자 상속 통산 등 엔진이 모르는 특칙이 있다).
+    # 다만 **모순을 조용히 통과시키지는 않는다** — 취득일과 양도일이 사실로 주어졌는데
+    # 보유기간을 다르게 적으면, 숫자만 바꿔 적어 비과세를 받아내는 길이 열린다.
+    # 실측: 보유 1일 양도에 holding_years: 12를 적자 경고 없이 세액 0원이 나왔다.
+    derived_hold = periods.holding_years(case, event.person_id, event.property_id, on)
+    derived_live = periods.residence_years(case, event.person_id, event.property_id, on)
+    period_conflicts: list[str] = []
+    if event.holding_years is not None and derived_hold is not None and event.holding_years != derived_hold:
+        period_conflicts.append(
+            f"보유기간: 입력 {event.holding_years}년 vs 취득일로 계산한 {derived_hold}년"
+        )
+    if event.residence_years is not None and derived_live is not None and event.residence_years != derived_live:
+        period_conflicts.append(
+            f"거주기간: 입력 {event.residence_years}년 vs 거주 이력으로 계산한 {derived_live}년"
+        )
+
+    event = replace(
+        event,
+        holding_years=event.holding_years if event.holding_years is not None else derived_hold,
+        residence_years=event.residence_years if event.residence_years is not None else derived_live,
+    )
+    if period_conflicts:
+        children.append(
+            node(
+                "tr.00.period_conflict",
+                "기간 입력과 사실이 어긋납니다",
+                Value.flag(
+                    False,
+                    certainty=Certainty(determination=DeterminationQuality.UNDECIDABLE),
+                    label="기간 정합성",
+                ),
+                subject=subject,
+                formula="입력한 보유·거주기간 vs 취득일·거주 이력에서 계산한 값",
+                substitution=" / ".join(period_conflicts),
+                note_ko=(
+                    "입력하신 값으로 계산했습니다. 배우자 상속분 통산이나 재건축 기간 통산처럼 "
+                    "정당한 사유가 있으면 맞습니다. 그렇지 않다면 취득일·거주 이력을 "
+                    "확인해주세요 — 기간이 세율 구간과 비과세 요건을 직접 가릅니다."
+                ),
+                alternatives_not_taken=(
+                    Alternative(
+                        key="period_from_facts",
+                        label_ko="취득일·거주 이력으로 계산한 기간",
+                        reason_ko=" / ".join(period_conflicts),
+                        actionable=True,
+                    ),
+                ),
+            )
+        )
+
     # ── 01. 주택 수 판정 (특례 반영) ────────────────────────────────
+    # ── 01. 주택 수 판정 ────────────────────────────────────────────
+    #
+    # ★ **세목이 다르면 주택 수 규정도 다르다**(SIM-07, 2026-08-05 시뮬레이션).
+    #   예전에는 종부세용 `assess()`의 결과를 그대로 썼다. 그래서 종합부동산세법
+    #   시행령의 주택 수 제외 특례(지방 저가주택 §4의2③, 합산배제 임대주택 §3 등)가
+    #   **양도소득세 비과세 판정에 그대로 흘러들었다.**
+    #
+    #   소득세법에는 지방 저가주택 제외가 없다. 1세대1주택 비과세의 주택 수 특례는
+    #   소득세법 시행령 §155(일시적 2주택·상속·동거봉양·혼인 합가 등)가 따로 정하고,
+    #   요건도 종부세와 다르다. 남의 법으로 센 주택 수로 비과세를 내주면
+    #   **낼 세금보다 적은 금액을 알려주는 것**이고, 그대로 신고하면 과소신고 가산세다.
+    #
+    #   실측: 부산 1채 + 대구 1채(공시 3억)를 가진 사람이 지방 저가주택 제외로
+    #   1세대1주택자가 되어 양도차익 5.4억이 전액 비과세로 나왔다.
+    #
+    #   그래서 여기서는 **제외 없이** 세대 주택 수를 센다. 소득세법 고유 특례는
+    #   아직 구현하지 않았으므로, 해당 가능성이 있으면 조용히 넘기지 않고 드러낸다.
     assessment = assess(case, event.person_id, ruleset, track=track, on=on)
-    one_house = assessment.is_one_house
-    house_count = assessment.count
+    counted, count_note = _transfer_house_count(case, event.person_id, on)
+    house_count = len(counted)
+    one_house = house_count == 1
+    children.append(
+        node(
+            "tr.01.house_count",
+            "1세대 주택 수 (양도소득세 기준)",
+            Value.flag(one_house, label="1세대1주택"),
+            subject=subject,
+            formula="세대 전원이 소유한 주택 수 (소득세법 §89①3호)",
+            substitution=f"세대 주택 {house_count}채: {', '.join(str(p) for p in counted)}",
+            branch=BranchRecord(
+                condition_ko="1세대1주택 해당 여부",
+                taken="1세대1주택" if one_house else f"{house_count}주택",
+            ),
+            note_ko=(
+                "종합부동산세의 주택 수 특례(지방 저가주택·합산배제 임대주택 등)는 "
+                "양도소득세에 적용되지 않습니다. 세목마다 규정이 다릅니다."
+            ),
+            alternatives_not_taken=(
+                (
+                    Alternative(
+                        key="income_tax_house_count_special",
+                        label_ko="소득세법 시행령 §155 주택 수 특례",
+                        reason_ko=count_note + " — 이 엔진은 아직 판정하지 않으므로 세무서 확인이 필요합니다",
+                        actionable=True,
+                    ),
+                )
+                if count_note
+                else ()
+            ),
+        )
+    )
 
     # ── 02. 양도차익 ────────────────────────────────────────────────
     gain_amount = max(
@@ -429,6 +542,50 @@ def compute_transfer_tax(
 # --------------------------------------------------------------------------
 
 
+def _transfer_house_count(
+    case: TaxCase, person_id: PersonId, on: date
+) -> tuple[tuple[PropertyId, ...], str]:
+    """양도소득세용 1세대 주택 수. **종부세 특례를 쓰지 않는다.**
+
+    소득세법 §89①3호의 '1세대 1주택'은 세대 전원이 소유한 주택을 센다.
+    제외 특례는 시행령 §155가 따로 정하는데(일시적 2주택, 상속주택, 동거봉양·혼인
+    합가, 농어촌주택 등) 요건이 종합부동산세법과 다르다. 아직 구현하지 않았으므로
+    **제외하지 않고 세고, 해당 가능성이 있으면 말한다.**
+
+    유리한 쪽으로 자동 가정하지 않는다는 원칙 그대로다 — 다만 방향이 반대다.
+    여기서 유리한 가정은 '주택 수를 줄이는 것'이고, 그건 비과세를 잘못 내주는 길이다.
+    """
+    members = set(case.household_member_ids(person_id))
+    owned: dict[PropertyId, None] = {}
+    for o in case.ownerships:
+        if o.person_id in members and case.find_property(o.property_id).is_house:
+            owned.setdefault(o.property_id, None)
+
+    counted = tuple(owned)
+    if len(counted) <= 1:
+        return counted, ""
+
+    # 소득세법 시행령 §155의 특례에 해당할 만한 단서가 있으면 알려준다.
+    hints: list[str] = []
+    recent = [
+        o for o in case.ownerships
+        if o.person_id in members and o.property_id in owned
+        and o.acquired_on is not None and (on - o.acquired_on).days < 3 * 365
+    ]
+    if recent:
+        hints.append("최근 3년 내 취득한 주택이 있어 일시적 2주택(시행령 §155①)에 해당할 수 있습니다")
+    if any(
+        o.cause is AcquisitionCause.INHERITANCE
+        for o in case.ownerships
+        if o.person_id in members and o.property_id in owned
+    ):
+        hints.append("상속받은 주택이 있어 상속주택 특례(시행령 §155②)에 해당할 수 있습니다")
+    if len(members) > 1:
+        hints.append("동거봉양·혼인으로 합가한 세대라면 합가 특례(시행령 §155④⑤)에 해당할 수 있습니다")
+
+    return counted, " / ".join(hints)
+
+
 def _exemption_eligible(
     case: TaxCase,
     ruleset: RuleSet,
@@ -506,7 +663,38 @@ def _exemption_eligible(
                 f"— 조정대상지역이었다면 거주 {min_live}년이 필요합니다"
             )
 
+    # ★ 기간 요건을 못 채웠다고 **끝난 게 아니다**(SIM-10, 2026-08-05 법령 대조).
+    #   시행령 §154⑧은 보유·거주기간을 통산하도록 정한다.
+    #     1호 소실·무너짐·노후로 멸실되어 재건축한 주택 → 멸실 주택의 기간을 통산
+    #     3호 상속인과 피상속인이 상속개시 당시 동일세대 → 상속 전 기간을 통산
+    #
+    #   재건축 조합원이 준공 2년 안에 팔면 20년 보유자도 "보유 1년"으로 읽히고,
+    #   부모와 살던 집을 상속받아 팔면 상속개시일부터만 세어 2년 미달이 된다.
+    #   둘 다 매우 흔하다.
+    #
+    #   멸실 주택의 취득일·피상속인의 보유기간은 지금 입력받지 않으므로 **통산을
+    #   지어내지 않는다.** 다만 통산 여지가 있는데 "미충족"이라고 단정하지도 않는다 —
+    #   답이 갈리는 자리에서는 갈린다고 말하는 것이 이 엔진의 규칙이다.
+    aggregation_hints: list[str] = []
+    if failures:
+        causes = {
+            o.cause
+            for o in case.ownerships_of(event.person_id)
+            if o.property_id == event.property_id
+        }
+        if AcquisitionCause.RECONSTRUCTION in causes or AcquisitionCause.NEW_BUILD in causes:
+            aggregation_hints.append(
+                "멸실 후 재건축한 주택이면 멸실 주택의 보유·거주기간을 통산합니다(시행령 §154⑧1호)"
+            )
+        if AcquisitionCause.INHERITANCE in causes:
+            aggregation_hints.append(
+                "상속개시 당시 피상속인과 동일세대였다면 상속 전 기간을 통산합니다(시행령 §154⑧3호)"
+            )
+
     ok = not failures
+    if aggregation_hints:
+        certainty = certainty & Certainty(determination=DeterminationQuality.UNDECIDABLE)
+
     # 지역 판정의 확실성도 함께 물고 온다 — 취득 당시 지역이 미상이면
     # 요건 판정 자체가 미상이다.
     certainty = certainty & zone_then.certainty
@@ -521,6 +709,19 @@ def _exemption_eligible(
                 actionable=True,
             ),
         )
+        if aggregation_hints:
+            alternatives += (
+                Alternative(
+                    key="holding_period_aggregation",
+                    label_ko="보유·거주기간 통산(시행령 §154⑧)",
+                    reason_ko=(
+                        " / ".join(aggregation_hints)
+                        + " — 통산하면 요건을 충족할 수 있습니다. 이 엔진은 멸실 주택의 "
+                        "취득일이나 피상속인의 보유기간을 입력받지 않아 판정하지 않았습니다."
+                    ),
+                    actionable=True,
+                ),
+            )
 
     return ok, node(
         "tr.03a.exemption_requirements",

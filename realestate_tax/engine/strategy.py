@@ -333,7 +333,12 @@ def _joint_spouse_strategy(
     신청이 늘 유리한 것은 아니다. 세액공제가 붙지 않는 연령대라면 각자 공제받는
     쪽이 이긴다. 그래서 추측하지 않고 완전 계산 2회를 돌린 차액만 쓴다.
     """
-    base_year = min(y for y in years if y >= case.year) if years else case.year
+    # ★ `if years`는 리스트가 비었는지만 본다. 필터를 걸고 나서 비는 경우를 못 막는다
+    #   (SIM-05, 2026-08-05). 사건 연도가 룰셋 사정 범위를 넘으면(예: 2030년) 타임라인이
+    #   2026~2029라 조건을 만족하는 해가 하나도 없고, min()이 빈 제너레이터에서 터진다.
+    #   "범위 밖입니다"라고 말해야 할 자리에서 상담 화면 전체가 죽었다.
+    future = [y for y in years if y >= case.year]
+    base_year = min(future) if future else case.year
     projected = project_case(case, base_year)
     cmp = compare_joint_spouse_election(projected, person_id, ruleset, options=options)
     if not cmp.eligible:

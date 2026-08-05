@@ -1,0 +1,488 @@
+# 양도소득세 · 부담부증여 앵글 — 경계와 모순만 골라 담았다.
+# 판정(주택수·1세대1주택·조정지역)은 전부 엔진 몫이다. 여기엔 사실만 있다.
+
+id: transfer-01
+label: 비조정지역 1채 · 보유 2년에서 딱 하루 모자란 날 양도
+origin: transfer
+intent: |
+  1세대1주택 비과세의 보유 2년 요건을 하루 차이로 깬다.
+  취득 2026-01-10, 양도 2028-01-09 = 2년 -1일.
+  엔진이 "2년 이상"을 초과/이상 중 무엇으로 세는지, 초일산입을 어떻게 처리하는지가 여기서 갈린다.
+expectation: |
+  보유기간이 2년에 하루 모자라 비과세가 성립하지 않는다.
+  장기보유특별공제도 3년 미만이라 표1·표2 어느 쪽도 적용되지 않아야 한다.
+tags: [양도세, 비과세, 보유요건, 경계, 하루차이]
+year: 2028
+subject: p1
+persons:
+  - {id: p1, name: 김보유, birth: 1980-05-11, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan1
+    name: 해운대 아파트
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    area_m2: 84.9
+    prices: {2028: 900_000_000}
+ownerships:
+  - {person: p1, property: busan1, share: 1, acquired: 2026-01-10, cause: purchase}
+residences:
+  - {person: p1, property: busan1, start: 2026-01-10}
+transfer:
+  property: busan1
+  person: p1
+  date: 2028-01-09
+  price: 1_400_000_000
+  acquisition_price: 900_000_000
+  acquisition_date: 2026-01-10
+  necessary_expense: 20_000_000
+  share: 1
+
+---
+
+id: transfer-02
+label: 조정지역 취득 1채 · 보유 3년 충족 · 거주 2년에서 하루 모자람
+origin: transfer
+intent: |
+  조정대상지역에서 취득했으므로 비과세에 거주 2년이 추가로 붙는다.
+  거주 이력이 2025-11-01 ~ 2027-10-31 = 정확히 2년 -1일.
+  비과세 탈락과 동시에 장기보유특별공제가 표2(최대 80%)에서 표1(최대 30%)로 떨어져야 한다.
+  두 판정이 같은 "거주 2년"을 공유하는데 한쪽만 떨어지면 로직이 갈라진 것이다.
+  취득일이 2025-10-16 이후라 조정지역 이력도 실제로 조회 가능한 구간이다.
+expectation: |
+  거주 2년을 하루 못 채워 비과세가 불가하고, 장특공제는 표2가 아니라 표1로 산정된다.
+  같은 물건을 하루 늦게 팔았다면 결과가 뒤집힌다는 점이 드러나야 한다.
+tags: [양도세, 거주요건, 조정지역, 장기보유특별공제, 표2탈락, 하루차이]
+year: 2028
+subject: p1
+persons:
+  - {id: p1, name: 이거주, birth: 1975-02-20, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: gangnam1
+    name: 역삼 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    area_m2: 101.2
+    prices: {2028: 2_000_000_000}
+ownerships:
+  - {person: p1, property: gangnam1, share: 1, acquired: 2025-10-20, cause: purchase}
+residences:
+  - {person: p1, property: gangnam1, start: 2025-11-01, end: 2027-10-31}
+transfer:
+  property: gangnam1
+  person: p1
+  date: 2028-10-25
+  price: 2_800_000_000
+  acquisition_price: 1_600_000_000
+  acquisition_date: 2025-10-20
+  necessary_expense: 50_000_000
+  share: 1
+
+---
+
+id: transfer-03
+label: 고가주택 경계 · 양도가액 정확히 12억
+origin: transfer
+intent: |
+  1세대1주택 고가주택 기준선을 정확히 밟는다. 양도가액 1,200,000,000원.
+  "12억 초과분"이므로 초과분이 0이어야 한다. 여기서 안분 계산식이
+  (양도가액 - 12억)/양도가액을 쓰면 0, >= 로 판정하면 전액 과세가 되어 갈린다.
+  비조정지역 취득이라 거주요건은 붙지 않는다.
+expectation: |
+  12억을 초과하지 않으므로 과세 대상 양도차익이 발생하지 않는 방향이어야 한다.
+  transfer-04(12억+1원)와 나란히 놓았을 때 차이가 사실상 1원어치여야 한다.
+tags: [양도세, 고가주택, 12억경계, 안분]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 박정확, birth: 1968-09-09, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: cheonan1
+    name: 천안 아파트
+    kind: apartment
+    dong: "4413010100"
+    urban: true
+    prices: {2027: 800_000_000}
+ownerships:
+  - {person: p1, property: cheonan1, share: 1, acquired: 2016-04-01, cause: purchase}
+residences:
+  - {person: p1, property: cheonan1, start: 2016-04-01}
+transfer:
+  property: cheonan1
+  person: p1
+  date: 2027-06-15
+  price: 1_200_000_000
+  acquisition_price: 500_000_000
+  acquisition_date: 2016-04-01
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: transfer-04
+label: 고가주택 경계 · 양도가액 12억 + 1원 · 표2 최대공제 구간
+origin: transfer
+intent: |
+  transfer-03과 1원만 다르다. 1,200,000,001원.
+  동시에 10년 보유 + 10년 거주라 장기보유특별공제 표2의 상한(80%)을 밟는다.
+  1원 초과분에 80% 공제를 얹으면 반올림·절사 처리가 어디서 일어나는지 드러난다.
+expectation: |
+  12억 초과분이 1원 상당으로 극히 작아, 과세 양도차익이 0에 수렴한다.
+  표2가 적용되어 공제율이 표1 상한(30%)보다 확연히 높아야 한다.
+tags: [양도세, 고가주택, 12억경계, 장기보유특별공제, 표2, 극단]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 최일원, birth: 1963-12-31, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: songpa1
+    name: 잠실 아파트
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2027: 1_100_000_000}
+ownerships:
+  - {person: p1, property: songpa1, share: 1, acquired: 2016-01-02, cause: purchase}
+residences:
+  - {person: p1, property: songpa1, start: 2016-01-02}
+transfer:
+  property: songpa1
+  person: p1
+  date: 2027-03-10
+  price: 1_200_000_001
+  acquisition_price: 400_000_000
+  acquisition_date: 2016-01-02
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: transfer-05
+label: 단기보유 · 보유 1년에서 하루 모자란 양도 (70% 구간)
+origin: transfer
+intent: |
+  취득 2026-03-01, 양도 2027-02-28 = 1년 -1일. 1년 미만 단일세율 70% 구간의 마지막 날.
+  차익이 작아 기본세율(6~45%)로 계산하면 훨씬 싸지는 구간을 일부러 잡았다.
+  단일세율과 기본세율 중 큰 쪽을 택하는지, 무조건 단일세율인지가 갈린다.
+expectation: |
+  보유 1년 미만으로 최고 단일세율 구간에 들어간다.
+  장특공제는 3년 미만이라 없고, 기본세율 산출세액보다 세부담이 크게 나오는 방향이어야 한다.
+tags: [양도세, 단기보유, 70%, 단일세율, 하루차이, 경계]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 정단기, birth: 1990-07-07, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: mokpo1
+    name: 목포 아파트
+    kind: apartment
+    dong: "4611010100"
+    urban: true
+    prices: {2027: 200_000_000}
+ownerships:
+  - {person: p1, property: mokpo1, share: 1, acquired: 2026-03-01, cause: purchase}
+transfer:
+  property: mokpo1
+  person: p1
+  date: 2027-02-28
+  price: 260_000_000
+  acquisition_price: 240_000_000
+  acquisition_date: 2026-03-01
+  necessary_expense: 3_000_000
+  share: 1
+
+---
+
+id: transfer-06
+label: 보유 1년 하고 하루 · 60% 구간인데 양도차손 · 필요경비가 양도가액보다 큼
+origin: transfer
+intent: |
+  세 가지 모순을 한 건에 겹쳤다.
+  ① 취득 2026-03-01, 양도 2027-03-02 = 1년 +1일 → 60% 단일세율 구간.
+  ② 양도가액 5억 < 취득가액 8억 → 양도차손.
+  ③ 필요경비 6억이 양도가액 5억보다 크다.
+  음수 과세표준에 60% 단일세율을 곱하면 음수 세액이 나올 수 있다.
+  0으로 하한을 두는지, 음수를 그대로 뱉는지, 아니면 예외로 죽는지를 본다.
+  지분도 1/2이라 안분 후 부호가 어떻게 유지되는지 함께 걸린다.
+expectation: |
+  양도차익이 음수(양도차손)이므로 납부할 세액이 0 이하로 내려가면 안 된다.
+  단일세율 구간이라도 결손에는 세금이 붙지 않는 방향이어야 한다.
+tags: [양도세, 양도차손, 필요경비초과, 60%, 단일세율, 모순, 공동지분]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 한손실, birth: 1985-01-15, household: h1, spouse: p2, is_resident: true}
+  - {id: p2, name: 한배우, birth: 1986-06-06, household: h1, spouse: p1, is_resident: true}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: hanam1
+    name: 하남 아파트
+    kind: apartment
+    dong: "4145010100"
+    urban: true
+    prices: {2027: 700_000_000}
+ownerships:
+  - {person: p1, property: hanam1, share: "1/2", acquired: 2026-03-01, cause: purchase}
+  - {person: p2, property: hanam1, share: "1/2", acquired: 2026-03-01, cause: purchase}
+transfer:
+  property: hanam1
+  person: p1
+  date: 2027-03-02
+  price: 500_000_000
+  acquisition_price: 800_000_000
+  acquisition_date: 2026-03-01
+  necessary_expense: 600_000_000
+  share: "1/2"
+
+---
+
+id: transfer-07
+label: 조정지역 3채 보유자가 2026년에 조정지역 1채 양도 (중과 창구)
+origin: transfer
+intent: |
+  서울 2채 + 성남 분당 1채. 세 채 모두 조정대상지역.
+  2026-09-15 양도라 한시 완화 창구(2027~2028) 밖이다.
+  3주택 이상 중과 +30%p가 붙는지, 장특공제가 배제되는지를 본다.
+  보유 12년이라 표1이라면 30% 공제가 나올 텐데, 중과 대상이면 공제가 0이어야 맞다.
+expectation: |
+  다주택 중과가 적용되는 방향이고, 중과 시 장기보유특별공제가 배제되어야 한다.
+  transfer-08과 같은 사실관계에서 양도일만 다르므로 두 건의 차이가 곧 한시 완화의 효과다.
+tags: [양도세, 다주택, 중과, 조정지역, 장특배제]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 오다주, birth: 1972-11-11, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - {id: gangnamA, name: 역삼 아파트, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 1_800_000_000}}
+  - {id: songpaB, name: 잠실 아파트, kind: apartment, dong: "1171010100", urban: true, prices: {2026: 1_500_000_000}}
+  - {id: bundangC, name: 분당 아파트, kind: apartment, dong: "4113510100", urban: true, prices: {2026: 1_100_000_000}}
+ownerships:
+  - {person: p1, property: gangnamA, share: 1, acquired: 2014-05-01, cause: purchase}
+  - {person: p1, property: songpaB, share: 1, acquired: 2018-08-20, cause: purchase}
+  - {person: p1, property: bundangC, share: 1, acquired: 2021-02-10, cause: purchase}
+transfer:
+  property: songpaB
+  person: p1
+  date: 2026-09-15
+  price: 2_400_000_000
+  acquisition_price: 1_000_000_000
+  acquisition_date: 2018-08-20
+  necessary_expense: 40_000_000
+  share: 1
+
+---
+
+id: transfer-08
+label: 같은 3채 보유자가 2027년에 양도 · 취득일 필드를 비움
+origin: transfer
+intent: |
+  transfer-07과 사실관계가 같고 양도일만 2027-05-20이다. 한시 완화 창구 안이다.
+  동시에 transfer 블록의 acquisition_date를 일부러 비워, 엔진이 ownerships의
+  acquired에서 보유기간을 도출하는지 확인한다. 못 도출하면 보유기간 0으로 떨어져
+  단기 70% 세율이 잘못 붙을 수 있다.
+expectation: |
+  한시 완화 창구 안이라 transfer-07보다 세부담이 낮아야 한다.
+  취득일을 비웠어도 보유기간은 2018-08-20 기준으로 잡혀 장기보유로 다뤄져야 한다.
+tags: [양도세, 다주택, 한시완화, 2027, 취득일없음, 빈값]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 오다주, birth: 1972-11-11, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - {id: gangnamA, name: 역삼 아파트, kind: apartment, dong: "1168010100", urban: true, prices: {2027: 1_800_000_000}}
+  - {id: songpaB, name: 잠실 아파트, kind: apartment, dong: "1171010100", urban: true, prices: {2027: 1_500_000_000}}
+  - {id: bundangC, name: 분당 아파트, kind: apartment, dong: "4113510100", urban: true, prices: {2027: 1_100_000_000}}
+ownerships:
+  - {person: p1, property: gangnamA, share: 1, acquired: 2014-05-01, cause: purchase}
+  - {person: p1, property: songpaB, share: 1, acquired: 2018-08-20, cause: purchase}
+  - {person: p1, property: bundangC, share: 1, acquired: 2021-02-10, cause: purchase}
+transfer:
+  property: songpaB
+  person: p1
+  date: 2027-05-20
+  price: 2_400_000_000
+  acquisition_price: 1_000_000_000
+  necessary_expense: 40_000_000
+  share: 1
+
+---
+
+id: transfer-09
+label: 부담부증여인데 채무가 0원 (사실상 순수증여)
+origin: transfer
+intent: |
+  부담부증여 블록을 쓰되 debt_assumed를 0으로 둔다.
+  채무비율 0/증여가액 = 0이므로 양도로 보는 부분이 없어야 한다.
+  0으로 나누기가 아니라 0을 나누는 쪽인데, 안분식을 뒤집어 짜면
+  증여가액/채무액이 되어 ZeroDivisionError가 난다. 그 지점을 겨눈다.
+expectation: |
+  유상양도로 보는 부분이 없어 양도소득세가 발생하지 않는 방향이어야 한다.
+  예외로 죽지 않고 "양도분 0"으로 답해야 한다.
+tags: [부담부증여, 채무0, 안분, 0나눗셈, 경계]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 서증여, birth: 1960-04-04, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: yongsan1
+    name: 한남 주택
+    kind: detached
+    dong: "1117010100"
+    urban: true
+    prices: {2027: 1_500_000_000}
+ownerships:
+  - {person: p1, property: yongsan1, share: 1, acquired: 2010-03-15, cause: purchase}
+residences:
+  - {person: p1, property: yongsan1, start: 2010-03-15}
+burden_gift:
+  property: yongsan1
+  person: p1
+  date: 2027-03-01
+  appraised_value: 1_500_000_000
+  gift_value: 1_500_000_000
+  debt_assumed: 0
+  acquisition_price: 600_000_000
+  necessary_expense: 0
+
+---
+
+id: transfer-10
+label: 부담부증여 · 채무가 증여가액 전액 (비율 100%)
+origin: transfer
+intent: |
+  debt_assumed = gift_value = 20억. 채무비율이 정확히 1.0이다.
+  증여로 보는 부분이 0이 되고 전부가 유상양도로 넘어간다.
+  비율이 1.0일 때 min()/clamp 처리가 1을 초과로 보는지, 이하로 보는지가 갈린다.
+  1세대1주택 요건은 갖춰 두었으므로 12억 초과분 안분까지 함께 걸린다.
+expectation: |
+  전부가 유상양도로 다뤄져 사실상 매매와 같은 성질이 나와야 한다.
+  증여세 과세 대상은 남지 않는 방향이다.
+tags: [부담부증여, 채무전액, 비율100, 고가주택, 안분]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 남전액, birth: 1958-08-08, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: gangseo1
+    name: 화곡 아파트
+    kind: apartment
+    dong: "1150010100"
+    urban: true
+    prices: {2027: 1_400_000_000}
+ownerships:
+  - {person: p1, property: gangseo1, share: 1, acquired: 2011-06-30, cause: purchase}
+residences:
+  - {person: p1, property: gangseo1, start: 2011-06-30}
+burden_gift:
+  property: gangseo1
+  person: p1
+  date: 2027-07-01
+  appraised_value: 2_000_000_000
+  gift_value: 2_000_000_000
+  debt_assumed: 2_000_000_000
+  acquisition_price: 700_000_000
+  necessary_expense: 10_000_000
+
+---
+
+id: transfer-11
+label: 부담부증여 · 평가액과 증여가액이 12억 경계를 사이에 두고 엇갈림
+origin: transfer
+intent: |
+  appraised_value 1,199,999,999원(12억 -1원) vs gift_value 1,200,000,001원(12억 +1원).
+  고가주택 12억 판정을 어느 값으로 하느냐에 따라 결과가 뒤집힌다.
+  평가액 기준이면 비고가, 증여가액 기준이면 고가다. 엔진이 어느 쪽을 쓰는지 드러나고,
+  두 값을 섞어 쓰면 안분 분모·분자가 어긋나 비율이 1을 넘을 수도 있다.
+  채무 6억은 두 값 어느 쪽으로 나눠도 비율이 미세하게 달라진다.
+expectation: |
+  12억 경계 판정에 어떤 값을 쓰는지가 결과에 그대로 드러나야 하고,
+  그 근거가 산출 과정에 명시되어야 한다. 두 값을 섞어 쓴 흔적이 있으면 안 된다.
+tags: [부담부증여, 평가액, 증여가액, 12억경계, 모순, 안분]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 유경계, birth: 1966-02-28, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: dongtan1
+    name: 동탄 아파트
+    kind: apartment
+    dong: "4159710100"
+    urban: true
+    prices: {2027: 900_000_000}
+ownerships:
+  - {person: p1, property: dongtan1, share: 1, acquired: 2019-09-01, cause: purchase}
+residences:
+  - {person: p1, property: dongtan1, start: 2019-09-01, end: 2021-08-31}
+burden_gift:
+  property: dongtan1
+  person: p1
+  date: 2027-11-11
+  appraised_value: 1_199_999_999
+  gift_value: 1_200_000_001
+  debt_assumed: 600_000_000
+  acquisition_price: 500_000_000
+  necessary_expense: 5_000_000
+
+---
+
+id: transfer-12
+label: 부담부증여 · 채무가 평가액을 넘고 증여가액에는 못 미침 (안분 분모 어긋남)
+origin: transfer
+intent: |
+  채무 9억 > 평가액 8억인데, 증여가액 10억보다는 작다.
+  채무액 > 증여가액은 스키마가 이미 반려하므로(확인 완료), 그 바로 옆칸을 찌른다.
+  안분 분모를 증여가액으로 잡으면 비율 0.9로 정상, 평가액으로 잡으면 1.125로 1을 넘는다.
+  1을 넘는 순간 증여로 보는 부분이 음수(-1억)가 된다.
+  분모를 어느 쪽으로 잡았는지에 따라 결과가 갈리므로, 스키마 검증이 증여가액만 보고
+  평가액 경로를 놓쳤다면 여기서 드러난다.
+  지분 1/1000이라는 극단값을 함께 물려 안분이 두 번 겹칠 때를 본다.
+expectation: |
+  채무비율이 1을 넘지 않도록 처리되어 증여로 보는 부분이 음수로 산출되면 안 된다.
+  평가액과 증여가액 중 무엇을 분모로 썼는지가 산출 과정에 드러나야 한다.
+tags: [부담부증여, 비율초과, 평가액, 극단지분, 음수, 안분]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 강모순, birth: 1955-10-10, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seogwipo1
+    name: 서귀포 단독주택
+    kind: detached
+    dong: "5013010100"
+    urban: false
+    prices: {2027: 1_000_000_000}
+ownerships:
+  - {person: p1, property: seogwipo1, share: "1/1000", acquired: 2013-01-01, cause: purchase}
+burden_gift:
+  property: seogwipo1
+  person: p1
+  date: 2027-12-31
+  appraised_value: 800_000_000
+  gift_value: 1_000_000_000
+  debt_assumed: 900_000_000
+  acquisition_price: 300_000_000
+  necessary_expense: 0

@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -245,11 +246,17 @@ class Person:
     """거주자 여부(소득세법상). 비거주자는 일부 특례에서 배제된다."""
 
     def age_at(self, on: date) -> int | None:
-        """만 나이. 생년월일이 없으면 None을 돌려 판정 불가로 흘려보낸다."""
+        """만 나이. 생년월일이 없으면 None을 돌려 판정 불가로 흘려보낸다.
+
+        2월 29일생은 평년에 해당일이 없다. 민법 §160③에 따라 **그 월의 말일**(2/28)에
+        나이를 먹는다. 이 처리를 빼면 윤년생만 하루씩 밀려 60/65/70세 세액공제
+        구간이 어긋난다 — 보유기간에서 같은 버그를 실측했다(SIM-08).
+        """
         if self.birth_date is None:
             return None
         years = on.year - self.birth_date.year
-        if (on.month, on.day) < (self.birth_date.month, self.birth_date.day):
+        birthday = min(self.birth_date.day, monthrange(on.year, self.birth_date.month)[1])
+        if (on.month, on.day) < (self.birth_date.month, birthday):
             years -= 1
         return years
 
@@ -420,11 +427,28 @@ class TaxCase:
 
         person_ids = {p.id for p in self.persons}
         property_ids = {p.id for p in self.properties}
+        shares: dict[PropertyId, Fraction] = {}
         for o in self.ownerships:
             if o.person_id not in person_ids:
                 raise ValueError(f"소유자가 persons에 없다: {o.person_id}")
             if o.property_id not in property_ids:
                 raise ValueError(f"물건이 properties에 없다: {o.property_id}")
+            shares[o.property_id] = shares.get(o.property_id, Fraction(0)) + o.share
+
+        # ★ 지분 합이 1을 넘으면 **존재할 수 없는 소유 관계**다(2026-08-05 시뮬레이션).
+        #   행마다 0<지분≤1만 검사하고 합을 안 봐서, 세 사람이 각 1/2씩 가진 사건이
+        #   조용히 통과해 세액까지 산출됐다. 데이터 오류가 숫자로 흘러들면
+        #   사용자는 그 숫자를 믿는다.
+        #
+        #   합이 1보다 **작은 것은 막지 않는다.** 세대 밖 공동소유자(친척·타인)를
+        #   사건에 적지 않는 것은 정상이고, 그 경우 합은 당연히 1에 못 미친다.
+        for pid, total in shares.items():
+            if total > 1:
+                raise ValueError(
+                    f"'{pid}'의 지분 합이 1을 넘는다: {total} "
+                    f"(소유 행 {sum(1 for o in self.ownerships if o.property_id == pid)}개). "
+                    "한 물건의 지분 총합은 1을 초과할 수 없다."
+                )
 
     @staticmethod
     def _require_unique(label: str, ids: list[str]) -> None:

@@ -1,0 +1,420 @@
+# 앵글: 1주택 · 고령자 · 거주 (one-house)
+#
+# 노리는 곳: 기본공제 경계(현행 12억 / 개편안 거주 14억·비거주 9억)의 ±1원,
+# 과세기준일(6/1)에 딱 걸린 생일과 보유 만기, 세액공제 합산 80% 한도,
+# 개편안의 보유공제→거주공제 4년 전환, 간주거주 사유, 그리고 빈 값·모순.
+
+id: one-house-01
+label: 개편안 거주 기본공제 14억에 공시가격이 정확히 일치
+origin: one-house
+intent: |
+  개편안 1세대1주택 거주자 기본공제가 14억이라면, 공시가격 14억 정확히는 과세표준이
+  정확히 0이어야 한다. 부등호가 >= 인지 > 인지가 여기서 갈린다.
+  연령·보유 세액공제가 개입하지 못하도록 나이는 젊게, 보유는 2년으로 눌러 두었다.
+expectation: |
+  현행은 12억 공제이므로 과세표준이 남아 세액이 나온다.
+  개편안은 과세표준이 0에 닿아 종부세가 사라지거나 최소값이 된다. 음수 과세표준은 나오면 안 된다.
+tags: [1주택, 거주, 기본공제경계, 경계]
+year: 2026
+years: [2026, 2027]
+growth: 0.0
+subject: p1
+persons:
+  - {id: p1, name: 갑01, birth: 1980-01-01, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 서울 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    area_m2: 84.9
+    prices: {2026: 1_400_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2024-06-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2024-06-01}
+
+---
+
+id: one-house-02
+label: 개편안 거주 기본공제 14억 + 1원
+origin: one-house
+intent: |
+  one-house-01과 단 1원만 다르다. 공제 초과분 1원에 공정시장가액비율과 세율을 곱했을 때
+  반올림·절사가 어디서 일어나는지, 그리고 1원이 0원으로 삼켜지는지를 본다.
+expectation: |
+  개편안 과세표준은 0보다 크되 극히 작다. 세액은 0이거나 최소 단위이며, 어떤 경우에도
+  one-house-01보다 낮아서는 안 된다(단조성).
+tags: [1주택, 거주, 기본공제경계, 경계, 극단]
+year: 2026
+years: [2026, 2027]
+growth: 0.0
+subject: p1
+persons:
+  - {id: p1, name: 갑02, birth: 1980-01-01, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 서울 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    area_m2: 84.9
+    prices: {2026: 1_400_000_001}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2024-06-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2024-06-01}
+
+---
+
+id: one-house-03
+label: 비거주 1주택 · 현행 기본공제 12억 - 1원
+origin: one-house
+intent: |
+  두 트랙의 경계가 서로 엇갈리는 지점이다. 현행 12억에는 1원 모자라 과세표준이 0이지만,
+  개편안 비거주 9억 기준으로는 약 3억이 과세된다.
+  "현행 0 → 개편안 과세"라는 뒤집힘을 엔진이 표현하는지, 그리고 세부담상한이
+  전년 세액 0을 어떻게 다루는지(0의 150%는 0인가) 함께 본다.
+expectation: |
+  현행 트랙은 종부세가 없고, 개편안 트랙은 종부세가 발생한다. 증감률이 0으로 나누기가 되어
+  무한대나 오류로 새면 안 된다.
+tags: [1주택, 비거주, 기본공제경계, 경계, 세부담상한]
+year: 2026
+years: [2026, 2027]
+growth: 0.0
+subject: p1
+prior_year_total_tax: 0
+persons:
+  - {id: p1, name: 갑03, birth: 1975-07-07, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 분당 아파트
+    kind: apartment
+    dong: "4113510100"
+    urban: true
+    prices: {2026: 1_199_999_999}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2018-03-15, cause: purchase}
+# 거주 이력 없음 = 과세기준일 현재 비거주
+
+---
+
+id: one-house-04
+label: 비거주 1주택 · 개편안 기본공제 9억 + 1원
+origin: one-house
+intent: |
+  개편안 비거주 기본공제 9억을 1원 넘긴다. 과세표준 1원에 공정시장가액비율을 곱하면
+  1원 미만이 되는데, 절사하면 0, 반올림하면 1이다. 여기서 세액이 음수나 소수로 새는지 본다.
+  현행 12억 기준으로는 여전히 비과세라 두 트랙의 차이가 온전히 개편안 몫이다.
+expectation: |
+  현행 종부세 0. 개편안은 0이거나 극소액이며 음수·소수점은 나오면 안 된다.
+  재산세는 두 트랙 모두 정상 부과된다(종부세만 0인 것이지 재산세가 0인 게 아니다).
+tags: [1주택, 비거주, 기본공제경계, 경계, 극단]
+year: 2026
+years: [2026, 2027]
+growth: 0.0
+subject: p1
+persons:
+  - {id: p1, name: 갑04, birth: 1975-07-07, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 해운대 아파트
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    prices: {2026: 900_000_001}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2019-11-20, cause: purchase}
+
+---
+
+id: one-house-05
+label: 연령 세액공제 60세 진입 — 생일이 과세기준일 6월 1일 당일
+origin: one-house
+intent: |
+  1966-06-01생은 2026-06-01에 만 60세가 되는 날이다. 만 나이는 생일 당일에 오르므로
+  60세 구간에 들어가야 맞다. 엔진이 (기준일 - 생일).days // 365 같은 근사로 계산하면
+  윤년 누적 때문에 하루가 밀려 공제를 못 받는다.
+  보유는 10년을 넘겨 두어 연령공제 유무만 결과를 흔들도록 격리했다.
+expectation: |
+  과세기준일 당일 생일자는 해당 연령 구간의 공제를 받는다. 연령 세액공제가 0으로
+  나오면 만 나이 계산이 하루 밀린 것이다.
+tags: [1주택, 고령자, 연령공제, 경계, 과세기준일]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 갑05, birth: 1966-06-01, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 잠실 아파트
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2026: 2_000_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2014-05-30, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2014-05-30}
+
+---
+
+id: one-house-06
+label: 연령 65세 진입이 하루 차이로 다음 해로 밀린다 (1961-06-02생)
+origin: one-house
+intent: |
+  1961-06-02생은 2026-06-01에는 만 64세(생일 하루 전), 2027-06-01에는 만 65세다.
+  같은 사람이 하루 때문에 2026년에는 60세 구간, 2027년에는 65세 구간을 받아야 한다.
+  두 해가 같은 공제율로 나오면 경계 처리가 틀린 것이다.
+expectation: |
+  2026년 연령 세액공제율 < 2027년 연령 세액공제율. 공시가격이 그대로라면 연령공제만으로
+  2027년 세액이 2026년보다 낮아질 수 있다(개편안 전환 효과와 뒤엉킬 수 있음).
+tags: [1주택, 고령자, 연령공제, 경계, 타임라인]
+year: 2026
+years: [2026, 2027]
+growth: 0.0
+subject: p1
+persons:
+  - {id: p1, name: 갑06, birth: 1961-06-02, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 용산 아파트
+    kind: apartment
+    dong: "1117010100"
+    urban: true
+    prices: {2026: 2_400_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2013-01-10, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2013-01-10}
+
+---
+
+id: one-house-07
+label: 70세 · 보유 15년에 하루 모자란 해와 채운 해 — 합산 80% 한도
+origin: one-house
+intent: |
+  2011-06-02 취득자는 2026-06-01에 보유 14년 364일(15년 미달), 2027-06-01에 15년을 채운다.
+  연령은 1956-05-31생이라 2026년에 이미 만 70세다.
+  2026년: 연령 40% + 보유 10년구간 → 합계가 한도에 근접.
+  2027년: 연령 40% + 보유 15년구간 → 산술 합계가 80%를 넘어 한도에서 잘려야 한다.
+  한도 캡이 없으면 2027년 공제율이 80%를 초과해 나온다.
+expectation: |
+  두 해 모두 세액공제율 합계가 80%를 넘지 않는다. 2027년 공제율 >= 2026년 공제율.
+  개편안 트랙에서 보유공제가 거주공제로 바뀌는 전환과 겹치므로 두 트랙의 공제 구성이 달라도 된다.
+tags: [1주택, 고령자, 보유공제, 한도80, 경계, 타임라인]
+year: 2026
+years: [2026, 2027]
+growth: 0.0
+subject: p1
+persons:
+  - {id: p1, name: 갑07, birth: 1956-05-31, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 역삼 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 3_000_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2011-06-02, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2011-06-02}
+
+---
+
+id: one-house-08
+label: 보유 20년 · 거주 1년 부부 공동명의 — 4년 전환에서 매년 답이 달라진다
+origin: one-house
+intent: |
+  개편안이 보유공제를 거주공제로 갈아타는 구간(2026 현행유지 / 2027 과도기 / 2028~ 거주)에
+  가장 크게 흔들리는 사람은 "오래 보유했지만 최근에야 들어와 산 사람"이다.
+  여기에 부부 공동명의 1주택 특례를 겹쳐, 특례를 신청하면 누구의 나이·보유·거주로
+  공제를 계산하는지까지 건드린다. 거주는 남편만 2025-01-01부터다.
+  네 해가 전부 같은 값으로 나오면 전환 로직이 아예 안 붙은 것이다.
+expectation: |
+  개편안 트랙에서 2026 → 2029로 갈수록 세액공제 구성이 보유 중심에서 거주 중심으로 이동하며,
+  거주 기간이 짧아 후반 연도의 공제율이 떨어질 수 있다. 네 해의 값이 전부 동일하면 의심.
+  특례 신청/미신청 비교가 나온다면 유리한 쪽이 선택돼야 한다.
+tags: [1주택, 부부공동명의, 전환, 거주공제, 타임라인]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+growth: 0.0
+subject: p1
+persons:
+  - {id: p1, name: 남편08, birth: 1955-03-10, household: h1, spouse: p2, is_resident: true}
+  - {id: p2, name: 아내08, birth: 1958-09-20, household: h1, spouse: p1, is_resident: true}
+households:
+  - {id: h1, members: [p1, p2], spouse_separately_registered: false}
+properties:
+  - id: house1
+    name: 하남 아파트
+    kind: apartment
+    dong: "4145010100"
+    urban: true
+    prices: {2026: 2_500_000_000}
+ownerships:
+  - {person: p1, property: house1, share: "1/2", acquired: 2006-05-01, cause: purchase}
+  - {person: p2, property: house1, share: "1/2", acquired: 2006-05-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2025-01-01}
+elections:
+  - {person: p1, kind: joint_spouse_special, designated_taxpayer: p1, auto_optimize: true}
+
+---
+
+id: one-house-09
+label: 간주거주 사유 5종이 이어 붙고 두 구간이 겹친다
+origin: one-house
+intent: |
+  전근·질병·학교폭력·동거봉양 같은 부득이한 사유로 인정되는 거주를 실제 거주와 이어 붙였다.
+  게다가 질병 구간(2020-03-01~2021-08-31)과 동거봉양 구간(2021-01-01~2022-12-31)이
+  8개월 겹친다. 겹친 기간을 두 번 세면 거주 기간이 실제보다 부풀어 공제 구간이 한 칸 뛴다.
+  간주거주가 개편안의 "거주자 기본공제 14억" 자격까지 만들어 주는지도 함께 본다.
+expectation: |
+  겹치는 구간은 한 번만 계산돼야 한다. 총 거주 기간이 2016-03-01부터 과세기준일까지의
+  달력 기간을 초과하면 중복 합산 버그다.
+tags: [1주택, 간주거주, 거주공제, 모순, 겹침]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 갑09, birth: 1963-04-15, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 화곡 아파트
+    kind: apartment
+    dong: "1150010100"
+    urban: true
+    prices: {2026: 1_800_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2016-03-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2016-03-01, end: 2018-02-28}
+  - {person: p1, property: house1, start: 2018-03-01, end: 2020-02-29, imputed_reason: job_transfer}
+  - {person: p1, property: house1, start: 2020-03-01, end: 2021-08-31, imputed_reason: illness}
+  - {person: p1, property: house1, start: 2021-01-01, end: 2022-12-31, imputed_reason: elder_care}
+  - {person: p1, property: house1, start: 2023-01-01, end: 2024-12-31, imputed_reason: school_violence}
+  - {person: p1, property: house1, start: 2025-01-01}
+
+---
+
+id: one-house-10
+label: 재건축 — 공사기간 거주 인정과 신축 취득일의 충돌
+origin: one-house
+intent: |
+  종전주택에 2012년부터 살다가 2021-05-01 철거, 2024-08-01 준공으로 다시 취득했다.
+  등기상 취득일은 2024년이지만 공사기간은 거주로 인정되고 종전 보유기간은 통산되는 것이
+  일반적이다. 엔진이 취득일만 보면 보유 2년짜리로 계산해 고령자 공제가 통째로 날아간다.
+  공사기간 39개월이 그대로 인정되는지, 1/2만 인정되는지도 갈림길이다.
+expectation: |
+  보유·거주 기간이 2024-08-01부터로만 계산되면 재건축 통산이 누락된 것이다.
+  반대로 공사기간을 전부 거주로 세면 과대 인정일 수 있다. 두 해 값이 단조롭게 이어져야 한다.
+tags: [1주택, 재건축, 간주거주, 보유공제, 고령자]
+year: 2026
+years: [2026, 2028]
+growth: 0.0
+subject: p1
+persons:
+  - {id: p1, name: 갑10, birth: 1954-12-31, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 재건축 신축 아파트
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2026: 2_200_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2024-08-01, cause: reconstruction}
+residences:
+  - {person: p1, property: house1, start: 2012-05-01, end: 2021-04-30}
+  - {person: p1, property: house1, start: 2021-05-01, end: 2024-07-31, imputed_reason: reconstruction}
+  - {person: p1, property: house1, start: 2024-08-01}
+
+---
+
+id: one-house-11
+label: 세 번 살았지만 과세기준일에는 한 번도 살지 않았다 (마지막 퇴거일 5월 31일)
+origin: one-house
+intent: |
+  거주 구간이 전부 6월 2일에 시작해 이듬해 5월 31일에 끝난다. 누적 거주는 3년에 가깝지만
+  어느 해에도 6월 1일 현재 거주자가 아니다. 특히 마지막 구간은 2026-05-31에 끝나
+  과세기준일 하루 전에 나갔다.
+  개편안의 "거주자 14억 / 비거주 9억"은 시점 판정이고, 거주 세액공제는 기간 판정이다.
+  둘을 같은 함수로 처리하면 여기서 모순이 드러난다.
+expectation: |
+  2026년 기본공제는 비거주 기준으로 잡히는 것이 자연스럽다(과세기준일 현재 미거주).
+  반면 누적 거주 기간은 0이 아니다. 이 둘이 동시에 성립해야 한다.
+  2027년에는 거주 이력이 더 늘지 않으므로 거주 관련 항목이 뒷걸음질하면 안 된다.
+tags: [1주택, 거주, 과세기준일, 재입주, 경계]
+year: 2026
+years: [2026, 2027]
+growth: 0.0
+subject: p1
+persons:
+  - {id: p1, name: 갑11, birth: 1959-01-01, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 동탄 아파트
+    kind: apartment
+    dong: "4159710100"
+    urban: true
+    prices: {2026: 1_500_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2015-02-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2019-06-02, end: 2020-05-31}
+  - {person: p1, property: house1, start: 2022-06-02, end: 2023-05-31}
+  - {person: p1, property: house1, start: 2025-06-02, end: 2026-05-31}
+
+---
+
+id: one-house-12
+label: 생년월일도 취득일도 없는데 거주 이력만 있다
+origin: one-house
+intent: |
+  실무 상담에서 흔한 결손 입력이다. 나이를 모르면 연령 공제를 계산할 수 없고,
+  취득일을 모르면 보유 기간을 계산할 수 없다.
+  엔진이 "모름"을 0세·0년으로 조용히 대체하면 사용자는 틀린 숫자를 정답으로 믿는다.
+  게다가 거주 시작(2009-01-01)이 알 수 없는 취득일보다 앞설 수도 있어, 보유보다 거주가
+  긴 모순 상태다. 판정 불가가 명시적으로 나오는 것이 옳은 동작이다.
+expectation: |
+  연령·보유 세액공제는 0으로 단정하지 말고 판정 불가로 표시돼야 한다.
+  기본공제와 재산세처럼 나이·취득일과 무관한 부분은 정상 계산될 수 있다.
+  예외로 죽거나, 나이를 0세로 가정해 공제 0%를 확정 출력하면 문제다.
+tags: [1주택, 빈값, 결손, 판정불가, 모순]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 갑12, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 목포 단독주택
+    kind: detached
+    dong: "4611010100"
+    urban: false
+    prices: {2026: 1_450_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1}
+residences:
+  - {person: p1, property: house1, start: 2009-01-01}

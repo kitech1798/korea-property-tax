@@ -1,0 +1,402 @@
+# 2회차 · 앵글: 양도세 세율 분기 (rate-band)
+#
+# 1회차에서 취득일이 읽히지 않아 보유기간이 항상 None이었고, 그 아래 트리가 전부
+# 단락됐다. 지금은 고쳐졌으므로 "보유기간이 세율을 가르는 지점"이 처음으로 도달 가능하다.
+#
+# 설계 원칙
+#  - holding_years / residence_years 를 쓰지 않는다(단 02는 일부러 명시해 우선순위를 본다).
+#    취득일과 양도일만 주고 기간은 엔진이 뽑게 한다.
+#  - 03/04/05 와 06/07 은 **날짜만 다르고 나머지가 동일**하다. 세율 점프가 날짜 하나에서
+#    나왔다는 것을 대조로 증명하기 위해서다.
+#  - 물건은 전부 조정대상지역(서울 강남) + 거주 이력 없음으로 두었다. 1세대1주택 비과세가
+#    끼어들어 세율 분기를 가리지 않게 하기 위함이다.
+#  - 과세표준을 구간 경계에 정확히 얹었다(장특공제 0인 3년 미만 구간이므로
+#    과표 = 양도차익 − 기본공제 250만).
+
+id: rate-band-01
+label: 취득한 그날 양도 — 보유기간 0일
+origin: rate-band-agent
+intent: |
+  취득일과 양도일이 같은 날일 때 보유기간이 0일로 나오는지, 아니면 날짜 차이 계산이
+  음수/None/1일로 새는지 본다. 1년 미만 단기세율(70%)의 하한 끝점.
+expectation: 보유기간은 0(일)이고 1년 미만 단기세율 구간으로 떨어진다. 장기보유특별공제는 없다.
+tags: [양도세, 세율분기, 보유0일, 경계]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 갑, birth: 1980-05-20, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: s1
+    name: 강남 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 800_000_000}
+ownerships:
+  - {person: p1, property: s1, share: 1, acquired: 2026-05-20, cause: purchase}
+transfer:
+  property: s1
+  person: p1
+  date: 2026-05-20
+  price: 900_000_000
+  acquisition_price: 890_000_000
+  acquisition_date: 2026-05-20
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: rate-band-02
+label: 취득 다음 날 양도 — 그런데 holding_years 12년이라고 명시했다
+origin: rate-band-agent
+intent: |
+  사실(취득 2026-04-01 → 양도 2026-04-02, 보유 1일)과 명시값(holding_years 12,
+  residence_years 10)이 정면으로 모순된다. 명시가 도출을 이기는지, 도출이 명시를
+  이기는지, 아니면 경고 없이 섞이는지 본다. 1회차에서는 이 분기 자체가 없었다.
+expectation: |
+  둘 중 하나로 일관되게 나와야 한다 — 1일 보유(단기세율·공제 0) 또는 12년 보유
+  (기본세율·장기보유특별공제 적용). 두 값이 섞여 세율은 단기인데 공제는 장기처럼
+  붙으면 그것이 결함이다.
+tags: [양도세, 명시vs도출, 모순, 보유1일]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 을, birth: 1975-02-11, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: s1
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 900_000_000}
+ownerships:
+  - {person: p1, property: s1, share: 1, acquired: 2026-04-01, cause: purchase}
+transfer:
+  property: s1
+  person: p1
+  date: 2026-04-02
+  price: 1_000_000_000
+  acquisition_price: 950_000_000
+  acquisition_date: 2026-04-01
+  necessary_expense: 0
+  share: 1
+  holding_years: 12
+  residence_years: 10
+
+---
+
+id: rate-band-03
+label: 1년 경계 −1일 — 취득 2025-03-10 · 양도 2026-03-09
+origin: rate-band-agent
+intent: |
+  "1년 미만 70%"의 마지막 날. 03/04/05는 양도일 하루씩만 다르고 금액·물건·인적사항이
+  전부 같다. 세율이 날짜 하나로 갈리는지 3점 대조로 확인한다.
+expectation: 1년 미만 구간 단기세율이 적용된다(04·05보다 세액이 높아야 한다).
+tags: [양도세, 세율분기, 1년경계, 하루전]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 병, birth: 1978-09-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: s1
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 1_100_000_000}
+ownerships:
+  - {person: p1, property: s1, share: 1, acquired: 2025-03-10, cause: purchase}
+transfer:
+  property: s1
+  person: p1
+  date: 2026-03-09
+  price: 1_200_000_000
+  acquisition_price: 1_000_000_000
+  acquisition_date: 2025-03-10
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: rate-band-04
+label: 1년 경계 당일 — 취득 2025-03-10 · 양도 2026-03-10
+origin: rate-band-agent
+intent: |
+  대응일 당일. 소득세법상 보유기간은 취득일부터 양도일까지이므로 이 날이 "1년 이상"의
+  첫날이어야 한다. 여기서 70%가 그대로 유지되면 경계가 하루 밀린 것이다.
+expectation: 1년 이상 2년 미만 구간 세율(60%)로 내려간다. 03보다 세액이 낮다.
+tags: [양도세, 세율분기, 1년경계, 당일]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 병, birth: 1978-09-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: s1
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 1_100_000_000}
+ownerships:
+  - {person: p1, property: s1, share: 1, acquired: 2025-03-10, cause: purchase}
+transfer:
+  property: s1
+  person: p1
+  date: 2026-03-10
+  price: 1_200_000_000
+  acquisition_price: 1_000_000_000
+  acquisition_date: 2025-03-10
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: rate-band-05
+label: 1년 경계 +1일 — 취득 2025-03-10 · 양도 2026-03-11
+origin: rate-band-agent
+intent: 경계를 확실히 넘은 지점. 04와 세율이 같아야 한다(같지 않으면 경계가 하루 밀린 것).
+expectation: 04와 동일한 세율 구간(1년 이상 2년 미만). 세액은 04와 사실상 같다.
+tags: [양도세, 세율분기, 1년경계, 하루후]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 병, birth: 1978-09-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: s1
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 1_100_000_000}
+ownerships:
+  - {person: p1, property: s1, share: 1, acquired: 2025-03-10, cause: purchase}
+transfer:
+  property: s1
+  person: p1
+  date: 2026-03-11
+  price: 1_200_000_000
+  acquisition_price: 1_000_000_000
+  acquisition_date: 2025-03-10
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: rate-band-06
+label: 2년 경계 −1일 — 취득 2024-07-01 · 양도 2026-06-30 · 과표 1,400만
+origin: rate-band-agent
+intent: |
+  "2년 미만 60%"의 마지막 날. 06과 07은 양도일만 하루 다르고 금액이 완전히 같다.
+  차익을 작게 잡아(양도차익 1,650만 → 기본공제 250만 차감 후 과표 1,400만) 단기 정률
+  60%와 누진 최저구간 6%의 낙차가 그대로 보이게 했다.
+expectation: 2년 미만 단기세율이 적용되어, 같은 차익인 07보다 세액이 몇 배 높다.
+tags: [양도세, 세율분기, 2년경계, 하루전, 과표1400만]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 정, birth: 1982-12-05, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: s1
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 700_000_000}
+ownerships:
+  - {person: p1, property: s1, share: 1, acquired: 2024-07-01, cause: purchase}
+transfer:
+  property: s1
+  person: p1
+  date: 2026-06-30
+  price: 766_500_000
+  acquisition_price: 750_000_000
+  acquisition_date: 2024-07-01
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: rate-band-07
+label: 2년 경계 당일 — 취득 2024-07-01 · 양도 2026-07-01 · 과표 정확히 1,400만
+origin: rate-band-agent
+intent: |
+  기본세율(누진)이 처음 열리는 날. 동시에 과세표준을 1,400만 원에 정확히 얹어
+  최저구간(6%, 누진공제 0)과 그 위 구간(15%, 누진공제 126만)의 경계가
+  "이하"로 끊기는지 "미만"으로 끊기는지 본다. 보유 2년이므로 장기보유특별공제(3년 이상)는
+  아직 0이어야 한다 — 여기서 공제가 붙으면 3년 요건이 새는 것이다.
+expectation: |
+  단기세율이 아니라 누진 기본세율로 전환된다. 장기보유특별공제는 0.
+  과표가 경계값과 정확히 같으므로 낮은 구간(6%)으로 처리되어야 한다.
+tags: [양도세, 세율분기, 2년경계, 당일, 과표경계, 누진공제]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 정, birth: 1982-12-05, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: s1
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 700_000_000}
+ownerships:
+  - {person: p1, property: s1, share: 1, acquired: 2024-07-01, cause: purchase}
+transfer:
+  property: s1
+  person: p1
+  date: 2026-07-01
+  price: 766_500_000
+  acquisition_price: 750_000_000
+  acquisition_date: 2024-07-01
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: rate-band-08
+label: 2년 경계 +1일 — 과세표준을 정확히 10억에 얹은 최고구간
+origin: rate-band-agent
+intent: |
+  누진 최상단. 양도차익 10억 250만 − 기본공제 250만 = 과표 10억 정확.
+  10억 "초과"부터 45%(누진공제 6,594만)이므로, 정확히 10억이면 42% 구간에
+  머물러야 한다. 경계에서 한 칸 위로 새면 누진공제도 함께 틀어져 오차가 커진다.
+expectation: |
+  누진 기본세율 적용. 과표가 최고구간 경계값과 같으므로 그 아래 구간 세율이 적용된다.
+  장기보유특별공제는 보유 2년이므로 0.
+tags: [양도세, 누진구간, 과표10억, 최고구간, 2년경계, 하루후]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 무, birth: 1969-08-14, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: s1
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 2_800_000_000}
+ownerships:
+  - {person: p1, property: s1, share: 1, acquired: 2024-07-01, cause: purchase}
+transfer:
+  property: s1
+  person: p1
+  date: 2026-07-02
+  price: 3_202_500_000
+  acquisition_price: 2_200_000_000
+  acquisition_date: 2024-07-01
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: rate-band-09
+label: 조정지역 3주택 · 보유 10개월 · 과세표준 정확히 5억 — 70% vs (40%+30%p) 동률 지점
+origin: rate-band-agent
+intent: |
+  소득세법 §104① 후단은 단기세율과 중과세율 중 **큰 쪽**을 적용한다.
+  과세표준을 3억 초과 5억 이하 구간(기본 40%)의 상단 경계인 5억에 정확히 얹었다.
+  3주택 중과 가산이 30%p라면 40+30 = 70%로 단기세율 70%와 정확히 같아진다 —
+  두 경로 중 어느 쪽을 탔든 결과가 같아야 하는 지점이고, 다르게 나오면
+  둘 중 한 경로의 계산이 틀린 것이다. 한시 중과배제가 살아 있으면 단기 70%만 남는다.
+expectation: |
+  1년 미만 보유이므로 단기세율 구간이고, 다주택 중과 판정과 경합한다.
+  둘 중 큰 쪽이 선택된 흔적(어느 쪽을 적용했는지)이 결과에 드러나야 한다.
+  중과 한시배제가 적용되면 중과 없이 단기세율만 남는 쪽으로 간다.
+tags: [양도세, 다주택중과, 단기세율경합, 과표5억, 경계]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 기, birth: 1971-06-30, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: gangnam
+    name: 강남 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 1_800_000_000}
+  - id: jamsil
+    name: 잠실 아파트
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2026: 1_500_000_000}
+  - id: bundang
+    name: 분당 아파트
+    kind: apartment
+    dong: "4113510100"
+    urban: true
+    prices: {2026: 1_000_000_000}
+ownerships:
+  - {person: p1, property: gangnam, share: 1, acquired: 2013-02-15, cause: purchase}
+  - {person: p1, property: jamsil, share: 1, acquired: 2019-08-08, cause: purchase}
+  - {person: p1, property: bundang, share: 1, acquired: 2026-01-05, cause: purchase}
+transfer:
+  property: bundang
+  person: p1
+  date: 2026-11-20
+  price: 1_502_500_000
+  acquisition_price: 1_000_000_000
+  acquisition_date: 2026-01-05
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: rate-band-10
+label: 윤년 2024-02-29 취득 · 2026-02-28 양도 · 조정지역 2주택 · 과표 정확히 8,800만
+origin: rate-band-agent
+intent: |
+  두 가지를 한 번에 밟는다.
+  ① 2월 29일 취득의 2년 대응일. 2026년에는 2월 29일이 없다. 대응일을 2/28로 보면
+     이 양도는 "2년 이상", 3/1로 보면 "2년 미만"이다. 어느 쪽으로 가는지 관측한다.
+  ② §104① 후단의 반대 방향. 과세표준을 8,800만(24% 구간 상단 경계)에 정확히 얹었다.
+     2주택 중과 가산이 20%p라면 24+20 = 44%로, 2년 미만 단기세율 60%보다 낮다.
+     즉 09와 달리 이번에는 단기세율 쪽이 커야 한다 — 큰 쪽 선택 로직이
+     방향에 관계없이 작동하는지 본다.
+expectation: |
+  보유기간이 2년 이상/미만 중 어느 쪽으로 판정되는지가 세율을 완전히 가른다.
+  2년 미만으로 가면 단기 60%와 중과 44%의 경합에서 60%가 이겨야 하고,
+  2년 이상으로 가면 누진 24% 구간 + 중과 가산으로 간다.
+tags: [양도세, 윤년, 2월29일, 다주택중과, 과표8800만, 경계]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 경, birth: 1984-02-29, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: hannam
+    name: 한남 아파트
+    kind: apartment
+    dong: "1117010100"
+    urban: true
+    prices: {2026: 2_000_000_000}
+  - id: hanam
+    name: 하남 아파트
+    kind: apartment
+    dong: "4145010100"
+    urban: true
+    prices: {2026: 800_000_000}
+ownerships:
+  - {person: p1, property: hannam, share: 1, acquired: 2011-10-04, cause: purchase}
+  - {person: p1, property: hanam, share: 1, acquired: 2024-02-29, cause: purchase}
+transfer:
+  property: hanam
+  person: p1
+  date: 2026-02-28
+  price: 890_500_000
+  acquisition_price: 800_000_000
+  acquisition_date: 2024-02-29
+  necessary_expense: 0
+  share: 1
