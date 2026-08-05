@@ -208,3 +208,172 @@ def test_나눠_취득해도_1세대1주택자_지위를_잃지_않는다(rs: Ru
     a = compute_jongbuse(one_row, P1, rs, track=Track.CURRENT)
     b = compute_jongbuse(two_rows, P1, rs, track=Track.CURRENT)
     assert a.total.as_int() == b.total.as_int(), "같은 집·같은 지분을 어떻게 적었느냐로 세액이 달라지면 안 된다"
+
+
+# --------------------------------------------------------------------------
+# 양도세 — 같은 병이 여기서도 났다 (SIM-06)
+# --------------------------------------------------------------------------
+
+
+def test_양도세도_취득일에서_보유기간을_도출한다(rs: RuleSet):
+    """SIM-06 — 취득일이 이벤트에 적혀 있는데 보유기간을 None으로 뒀다.
+
+    결과가 참혹했다. 10년 보유·10년 거주 1주택자가 12억에 팔아도
+      · 비과세 → "보유기간 미상"으로 요건 미충족
+      · 장특공제 → "보유 0년 < 3년"으로 0원
+      · 세율 → 보유 0년이라 **1년 미만 70% 단일세율**
+    셋이 한꺼번에 걸려 차익 전액에 70%가 붙었다. 실제 세액은 0원이다.
+    """
+    from realestate_tax.engine.transfer_tax import TransferEvent, compute_transfer_tax
+
+    case = TaxCase(
+        year=2027,
+        persons=(Person(id=P1, birth_date=date(1970, 1, 1), household_id=HouseholdId("hh")),),
+        households=(Household(id=HouseholdId("hh"), member_ids=(P1,)),),
+        properties=(
+            Property(
+                id=H1,
+                kind=PropertyKind.APARTMENT,
+                legal_dong_code="2647010100",  # 비조정지역 — 거주요건 무관
+                published_prices=(PriceFact(2027, 900_000_000),),
+            ),
+        ),
+        ownerships=(Ownership(person_id=P1, property_id=H1, acquired_on=date(2016, 4, 1)),),
+        residences=(ResidenceSpell(person_id=P1, property_id=H1, start=date(2016, 4, 1)),),
+    )
+    event = TransferEvent(
+        property_id=H1,
+        person_id=P1,
+        transfer_date=date(2027, 6, 15),
+        transfer_price=1_200_000_000,
+        acquisition_price=500_000_000,
+    )
+    result = compute_transfer_tax(case, event, rs, track=Track.CURRENT)
+
+    node = result.trace.find("tr.03a.exemption_requirements")
+    assert "보유 11년" in node.substitution
+    assert "거주 11년" in node.substitution
+    # 양도가액 12억 이하 1세대1주택 = 비과세 (소득세법 §89①3호)
+    assert result.taxable_gain.as_int() == 0
+    assert result.total.as_int() == 0
+
+
+def test_이벤트에_적은_기간이_도출값을_이긴다(rs: RuleSet):
+    """배우자 상속분 통산처럼 엔진이 모르는 특칙은 사용자만 안다."""
+    from realestate_tax.engine.transfer_tax import TransferEvent, compute_transfer_tax
+
+    case = TaxCase(
+        year=2027,
+        persons=(Person(id=P1, birth_date=date(1970, 1, 1), household_id=HouseholdId("hh")),),
+        households=(Household(id=HouseholdId("hh"), member_ids=(P1,)),),
+        properties=(
+            Property(
+                id=H1,
+                kind=PropertyKind.APARTMENT,
+                legal_dong_code="2647010100",
+                published_prices=(PriceFact(2027, 900_000_000),),
+            ),
+        ),
+        ownerships=(Ownership(person_id=P1, property_id=H1, acquired_on=date(2026, 4, 1)),),
+    )
+    event = TransferEvent(
+        property_id=H1, person_id=P1, transfer_date=date(2027, 6, 15),
+        transfer_price=2_000_000_000, acquisition_price=500_000_000,
+        holding_years=20,
+    )
+    result = compute_transfer_tax(case, event, rs, track=Track.CURRENT)
+    assert "보유 20년" in result.trace.find("tr.03a.exemption_requirements").substitution
+
+
+def test_취득일이_없으면_보유_0년으로_단언하지_않는다(rs: RuleSet):
+    """0년과 미상은 다르다. 0년으로 내리면 **확정적으로 불리한 판정**이 나간다."""
+    from realestate_tax.engine.transfer_tax import TransferEvent, compute_transfer_tax
+
+    case = TaxCase(
+        year=2027,
+        persons=(Person(id=P1, birth_date=date(1970, 1, 1), household_id=HouseholdId("hh")),),
+        households=(Household(id=HouseholdId("hh"), member_ids=(P1,)),),
+        properties=(
+            Property(
+                id=H1, kind=PropertyKind.APARTMENT, legal_dong_code="2647010100",
+                published_prices=(PriceFact(2027, 900_000_000),),
+            ),
+        ),
+        ownerships=(Ownership(person_id=P1, property_id=H1, acquired_on=None),),
+    )
+    event = TransferEvent(
+        property_id=H1, person_id=P1, transfer_date=date(2027, 6, 15),
+        transfer_price=2_000_000_000, acquisition_price=500_000_000,
+    )
+    result = compute_transfer_tax(case, event, rs, track=Track.CURRENT)
+    assert "short_term_rate_assumed" in {a.key for a in result.trace.all_alternatives()}
+
+
+def test_거주_이력이_없는_것과_0년은_다르다(rs: RuleSet):
+    """이력이 한 줄도 없으면 '안 살았다'가 아니라 '모른다'다."""
+    from realestate_tax.engine import periods
+
+    case = _case(acquired=date(2016, 1, 1))
+    assert periods.residence_years(case, P1, H1, date(2026, 6, 1)) is None
+
+    lived = _case(
+        acquired=date(2016, 1, 1),
+        spells=(
+            ResidenceSpell(person_id=P1, property_id=H1, start=date(2016, 1, 1), end=date(2016, 2, 1)),
+        ),
+    )
+    assert periods.residence_years(lived, P1, H1, date(2026, 6, 1)) == 0
+
+
+def test_중과_한시완화_창구가_실제로_이득을_보여준다(rs: RuleSet):
+    """SIM-06의 가장 비싼 증상 — 개편안의 **간판 전략**이 무력화돼 있었다.
+
+    '27~'28 다주택 중과 한시완화(소득세법 §104⑦ 개정안)는 종부세를 올리면서
+    매도 창구를 열어주는 설계다. 그런데 완화 블록의 `min_holding_years: 2` 게이트가
+    보유기간을 못 읽어 **매번 실패**하고 현행 30%p로 폴백했다. 룰셋에는 완화가
+    멀쩡히 들어 있었는데 화면에는 이득이 0원으로 나왔다.
+
+    실측 차이 2.99억원. "지금 팔까 버틸까"에 답하는 것이 이 서비스의 목적이라
+    이 회귀는 서비스의 존재 이유를 무력화한다.
+    """
+    from fractions import Fraction
+
+    from realestate_tax.engine.transfer_tax import TransferEvent, compute_transfer_tax
+
+    SEOUL2 = "1171010100"  # 송파 — 조정대상지역
+    people = (Person(id=P1, birth_date=date(1970, 1, 1), household_id=HouseholdId("hh")),)
+    props = tuple(
+        Property(
+            id=PropertyId(f"h{i}"),
+            kind=PropertyKind.APARTMENT,
+            legal_dong_code=SEOUL2,
+            published_prices=(PriceFact(2026, 2_000_000_000),),
+        )
+        for i in range(3)
+    )
+    case = TaxCase(
+        year=2026,
+        persons=people,
+        households=(Household(id=HouseholdId("hh"), member_ids=(P1,)),),
+        properties=props,
+        ownerships=tuple(
+            Ownership(person_id=P1, property_id=p.id, share=Fraction(1),
+                      acquired_on=date(2015, 3, 1))
+            for p in props
+        ),
+    )
+    event = TransferEvent(
+        property_id=PropertyId("h0"),
+        person_id=P1,
+        transfer_date=date(2027, 5, 20),
+        transfer_price=2_500_000_000,
+        acquisition_price=1_100_000_000,
+    )
+    current = compute_transfer_tax(case, event, rs, track=Track.CURRENT)
+    reform = compute_transfer_tax(case, event, rs, track=Track.REFORM)
+
+    assert reform.total.as_int() < current.total.as_int(), (
+        "'27 한시완화가 현행보다 싸지 않다 — 완화 게이트가 다시 막혔다"
+    )
+    node = reform.trace.find("tr.07.income_tax")
+    assert "10%p" in node.substitution, f"중과율이 완화되지 않았다: {node.substitution}"

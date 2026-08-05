@@ -318,3 +318,57 @@ def test_라벨은_주의가_필요한_축만_돌려준다():
         determination=DeterminationQuality.UNDECIDABLE,
     )
     assert risky.labels_ko() == ("국회 미통과", "추정치", "판단 필요")
+
+
+def test_지분_합이_1을_넘으면_사건을_만들_수_없다():
+    """존재할 수 없는 소유 관계는 계산에 들어가기 전에 죽어야 한다.
+
+    행마다 0<지분≤1만 검사하고 합을 안 보면, 세 사람이 각 1/2씩 가진 사건이
+    조용히 통과해 세액까지 산출된다(2026-08-05 시뮬레이션 edge-09). 데이터 오류가
+    숫자로 흘러들면 사용자는 그 숫자를 믿는다.
+    """
+    from fractions import Fraction
+
+    import pytest
+
+    people = tuple(
+        Person(id=PersonId(f"p{i}"), household_id=HouseholdId("hh")) for i in range(3)
+    )
+    prop = Property(
+        id=PropertyId("h"),
+        kind=PropertyKind.APARTMENT,
+        legal_dong_code="1168010100",
+        published_prices=(PriceFact(2026, 1_000_000_000),),
+    )
+    with pytest.raises(ValueError, match="지분 합이 1을 넘는다"):
+        TaxCase(
+            year=2026,
+            persons=people,
+            households=(Household(id=HouseholdId("hh"), member_ids=tuple(p.id for p in people)),),
+            properties=(prop,),
+            ownerships=tuple(
+                Ownership(person_id=p.id, property_id=prop.id, share=Fraction(1, 2))
+                for p in people
+            ),
+        )
+
+
+def test_지분_합이_1에_못_미치는_것은_정상이다():
+    """세대 밖 공동소유자(친척·타인)를 사건에 적지 않는 것은 정상이다.
+    막아 버리면 흔한 실제 상황을 표현할 수 없게 된다."""
+    from fractions import Fraction
+
+    prop = Property(
+        id=PropertyId("h"),
+        kind=PropertyKind.APARTMENT,
+        legal_dong_code="1168010100",
+        published_prices=(PriceFact(2026, 1_000_000_000),),
+    )
+    case = TaxCase(
+        year=2026,
+        persons=(Person(id=PersonId("p1"), household_id=HouseholdId("hh")),),
+        households=(Household(id=HouseholdId("hh"), member_ids=(PersonId("p1"),)),),
+        properties=(prop,),
+        ownerships=(Ownership(person_id=PersonId("p1"), property_id=prop.id, share=Fraction(1, 4)),),
+    )
+    assert case.owners_of(prop.id)[0].share == Fraction(1, 4)

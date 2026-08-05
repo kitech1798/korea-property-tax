@@ -250,12 +250,17 @@ residences:
 ---
 
 id: edge-09
-label: 지분 1/1000 · 합이 1을 넘는 공유 · 합이 1에 못 미치는 공유
+label: 지분 1/1000 · 세대 밖 공동소유(합 < 1) · 초극단 지분
 origin: edge
 intent: |
-  지분 합계 불변식을 깬다. tiny는 1/1000 초소액 지분(주택 수에는 잡히지만 세액은 미미),
-  over는 3인이 1/2씩이라 합이 3/2, under는 1/4 하나뿐이라 합이 1/4다.
-  합이 1이 아닐 때 엔진이 정규화하는지, 그대로 쓰는지, 불변식 위반으로 잡아내는지가 관심사.
+  지분 합이 1에 못 미치는 경우를 엔진이 정규화하지 않고 그대로 쓰는지 본다.
+  tiny는 1/1000 초소액 지분(주택 수에는 잡히지만 세액은 미미), over는 부부 1/2씩 + 세대 밖
+  제3자 지분은 사건에 적지 않은 경우(합 1), under는 1/4 하나뿐이라 합이 1/4다.
+
+  ★ 원래 이 시나리오는 3인이 1/2씩 가져 합이 3/2인 사건이었다. 그때는 아무 경고 없이
+    세액까지 산출됐는데, 그 발견으로 TaxCase가 지분 합 > 1을 거부하게 됐다(2026-08-05).
+    이제 그 사건은 **모델 단계에서** 죽으므로 여기서는 유효한 쪽만 남긴다.
+    거부 자체는 tests/test_domain.py가 고정한다.
 expectation: |
   지분 합 오류는 조용히 정규화하지 말고 드러나야 한다.
   1/1000 지분도 지분율만큼만 과세되어야 하며, 지분이 작다고 세액이 음수가 되면 안 된다.
@@ -265,19 +270,18 @@ subject: p1
 persons:
   - {id: p1, name: 임, birth: 1979-09-09, household: h1, spouse: p2}
   - {id: p2, name: 임의 배우자, birth: 1981-01-20, household: h1, spouse: p1}
-  - {id: p3, name: 남, birth: 1955-03-03, household: h2}
+  - {id: p3, name: 남(세대 밖 공동소유자), birth: 1955-03-03, household: h2}
 households:
   - {id: h1, members: [p1, p2]}
   - {id: h2, members: [p3]}
 properties:
   - {id: tiny, name: 1000분의 1 지분 물건, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 5_000_000_000}}
-  - {id: over, name: 지분 합이 1을 넘는 물건, kind: apartment, dong: "1171010100", urban: true, prices: {2026: 2_400_000_000}}
+  - {id: over, name: 부부 공동소유 물건, kind: apartment, dong: "1171010100", urban: true, prices: {2026: 2_400_000_000}}
   - {id: under, name: 지분 합이 1에 못 미치는 물건, kind: detached, dong: "2647010100", urban: true, prices: {2026: 1_600_000_000}}
 ownerships:
   - {person: p1, property: tiny, share: "1/1000", acquired: 2020-05-05}
   - {person: p1, property: over, share: "1/2", acquired: 2018-01-01}
   - {person: p2, property: over, share: "1/2", acquired: 2018-01-01}
-  - {person: p3, property: over, share: "1/2", acquired: 2018-01-01}
   - {person: p1, property: under, share: "1/4", acquired: 2016-10-10}
 
 ---

@@ -32,6 +32,7 @@ from ..domain.models import (
 )
 from ..rules.resolver import RuleSet
 from ..rules.schema import Track
+from . import periods
 from .regions import UNKNOWN, YES, check_regulated
 from .special_houses import assess
 from .trace import (
@@ -280,6 +281,30 @@ def compute_transfer_tax(
     prop = case.find_property(event.property_id)
     subject = SubjectRef(SubjectType.PROPERTY, str(prop.id), prop.display_name or str(prop.id))
     children: list[TraceNode] = []
+
+    # ── 00. 기간 확정 — **여기 한 곳에서** 사실로부터 뽑는다 ────────
+    #
+    # ★ 취득일이 이벤트에도 소유 이력에도 적혀 있는데 보유기간을 None으로 두고 있었다
+    #   (SIM-06, 2026-08-05 시뮬레이션). 결과가 참혹했다:
+    #     · tr.03a 비과세 → "보유기간 미상"으로 요건 미충족
+    #     · tr.05 장특공제 → "보유 0년 < 3년"으로 0원
+    #     · tr.09 세율 → 보유 0년이라 **1년 미만 70% 단일세율**
+    #   즉 10년 보유·10년 거주 1주택자가 12억에 팔아도 **차익 전액에 70%**가 붙었다.
+    #   골든 테스트가 못 잡은 이유는 SIM-01과 같다 — 테스트가 기간을 손으로 먹여줬다.
+    #
+    #   아래 20여 곳이 event.holding_years를 직접 읽으므로, 입구에서 한 번 채워
+    #   전 구간이 같은 값을 보게 한다. 호출부마다 도출하게 하면 한 곳을 빠뜨린다.
+    event = replace(
+        event,
+        holding_years=periods.holding_years(
+            case, event.person_id, event.property_id, on,
+            declared_years=event.holding_years, declared_date=event.acquisition_date,
+        ),
+        residence_years=periods.residence_years(
+            case, event.person_id, event.property_id, on,
+            declared=event.residence_years,
+        ),
+    )
 
     # ── 01. 주택 수 판정 (특례 반영) ────────────────────────────────
     assessment = assess(case, event.person_id, ruleset, track=track, on=on)

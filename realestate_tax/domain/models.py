@@ -420,11 +420,28 @@ class TaxCase:
 
         person_ids = {p.id for p in self.persons}
         property_ids = {p.id for p in self.properties}
+        shares: dict[PropertyId, Fraction] = {}
         for o in self.ownerships:
             if o.person_id not in person_ids:
                 raise ValueError(f"소유자가 persons에 없다: {o.person_id}")
             if o.property_id not in property_ids:
                 raise ValueError(f"물건이 properties에 없다: {o.property_id}")
+            shares[o.property_id] = shares.get(o.property_id, Fraction(0)) + o.share
+
+        # ★ 지분 합이 1을 넘으면 **존재할 수 없는 소유 관계**다(2026-08-05 시뮬레이션).
+        #   행마다 0<지분≤1만 검사하고 합을 안 봐서, 세 사람이 각 1/2씩 가진 사건이
+        #   조용히 통과해 세액까지 산출됐다. 데이터 오류가 숫자로 흘러들면
+        #   사용자는 그 숫자를 믿는다.
+        #
+        #   합이 1보다 **작은 것은 막지 않는다.** 세대 밖 공동소유자(친척·타인)를
+        #   사건에 적지 않는 것은 정상이고, 그 경우 합은 당연히 1에 못 미친다.
+        for pid, total in shares.items():
+            if total > 1:
+                raise ValueError(
+                    f"'{pid}'의 지분 합이 1을 넘는다: {total} "
+                    f"(소유 행 {sum(1 for o in self.ownerships if o.property_id == pid)}개). "
+                    "한 물건의 지분 총합은 1을 초과할 수 없다."
+                )
 
     @staticmethod
     def _require_unique(label: str, ids: list[str]) -> None:

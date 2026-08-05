@@ -37,6 +37,7 @@ from ..domain.models import (
 )
 from ..rules.resolver import MissingRule, RuleSet
 from ..rules.schema import RateTable, Track
+from . import periods
 from .special_houses import SpecialAssessment, SpecialKind, assess, special_trace
 from .property_tax import (
     PropertyTaxOptions,
@@ -560,56 +561,22 @@ def _derive_periods(
     if main is None:
         return options.holding_years, options.residence_years, "기준 1주택 없음"
 
-    holding = options.holding_years
-    source = []
-    if holding is None:
-        owned = [o for o in case.ownerships_of(person_id) if o.property_id == main]
-        acquired = [o.acquired_on for o in owned if o.acquired_on is not None]
-        if acquired:
-            # 지분을 여러 번 나눠 취득했으면 **가장 이른 날**이 보유 개시일이다.
-            holding = _full_years(min(acquired), on)
-            source.append(f"보유 {holding}년(취득일 {min(acquired)})")
+    holding = periods.holding_years(
+        case, person_id, main, on, declared_years=options.holding_years
+    )
+    residence = periods.residence_years(
+        case, person_id, main, on, declared=options.residence_years
+    )
 
-    residence = options.residence_years
-    if residence is None:
+    source = []
+    if options.holding_years is None and holding is not None:
+        started = periods.acquisition_date(case, person_id, main)
+        source.append(f"보유 {holding}년(취득일 {started})")
+    if options.residence_years is None and residence is not None:
         spells = case.residences_of(person_id, main)
-        if spells:
-            residence = _merged_years(spells, on)
-            source.append(f"거주 {residence}년(거주 이력 {len(spells)}구간)")
+        source.append(f"거주 {residence}년(거주 이력 {len(spells)}구간)")
 
     return holding, residence, " · ".join(source) or "도출할 사실 없음"
-
-
-def _full_years(start: date, on: date) -> int:
-    """만 연수. 생일 계산과 같은 규약을 쓴다 — 하루 차이로 공제 구간이 갈린다."""
-    years = on.year - start.year
-    if (on.month, on.day) < (start.month, start.day):
-        years -= 1
-    return max(0, years)
-
-
-def _merged_years(spells: Sequence[ResidenceSpell], on: date) -> int:
-    """거주 구간의 합을 만 연수로.
-
-    구간을 **병합한 뒤** 더한다. 겹치는 구간(본인이 두 줄로 나눠 입력한 경우 등)을
-    그냥 더하면 살지도 않은 기간이 공제로 둔갑한다.
-    """
-    windows: list[tuple[date, date]] = []
-    for s in spells:
-        finish = min(s.end, on) if s.end is not None else on
-        if finish > s.start:
-            windows.append((s.start, finish))
-    if not windows:
-        return 0
-    windows.sort()
-    merged: list[list[date]] = [list(windows[0])]
-    for start, finish in windows[1:]:
-        if start <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], finish)
-        else:
-            merged.append([start, finish])
-    days = sum((f - s).days for s, f in merged)
-    return days // 365
 
 
 def _taxable_threshold(
