@@ -267,3 +267,82 @@ def test_개편안_장특공제_3단계가_실제로_갈린다(rs: RuleSet):
     assert round(ltd_rate(2027, 10, 3), 2) == 0.52   # 보유 4%×10 + 거주 4%×3
     assert round(ltd_rate(2028, 10, 3), 2) == 0.38   # 보유 2%×10 + 거주 6%×3
     assert round(ltd_rate(2029, 10, 3), 2) == 0.24   # 보유 폐지 + 거주 8%×3
+
+
+# --------------------------------------------------------------------------
+# 소득세법 시행령 §155 — 양도세 고유 주택수 특례
+# --------------------------------------------------------------------------
+
+OLD = PropertyId("old")
+NEW = PropertyId("new")
+
+
+def _two_acquisitions(old_acq: date, new_acq: date) -> TaxCase:
+    return TaxCase(
+        year=2027,
+        persons=(Person(id=P1, birth_date=date(1975, 1, 1), household_id=HouseholdId("hh")),),
+        households=(Household(id=HouseholdId("hh"), member_ids=(P1,)),),
+        properties=(
+            Property(id=OLD, kind=PropertyKind.APARTMENT, legal_dong_code=BUSAN,
+                     published_prices=(PriceFact(2027, 900_000_000),)),
+            Property(id=NEW, kind=PropertyKind.APARTMENT, legal_dong_code=BUSAN,
+                     published_prices=(PriceFact(2027, 900_000_000),)),
+        ),
+        ownerships=(
+            Ownership(person_id=P1, property_id=OLD, acquired_on=old_acq),
+            Ownership(person_id=P1, property_id=NEW, acquired_on=new_acq),
+        ),
+        residences=(ResidenceSpell(person_id=P1, property_id=OLD, start=old_acq),),
+    )
+
+
+def _sell(pid: PropertyId) -> TransferEvent:
+    return TransferEvent(
+        property_id=pid, person_id=P1, transfer_date=date(2027, 6, 15),
+        transfer_price=1_100_000_000, acquisition_price=600_000_000,
+    )
+
+
+def test_일시적_2주택은_종전주택을_팔_때만_1세대1주택이다(rs: RuleSet):
+    """소득세법 시행령 §155① — 조문 원문(2026-08-05 법제처 XML).
+
+    "종전의 주택을 취득한 날부터 **1년 이상**이 지난 후 신규 주택을 취득하고
+     신규 주택을 취득한 날부터 **3년 이내**에 종전의 주택을 양도하는 경우"
+
+    ★ 종부세의 일시적 2주택(종부령 §4의2①)과 요건이 다르다. 세목을 섞으면 안 된다.
+    """
+    case = _two_acquisitions(date(2018, 3, 1), date(2025, 9, 1))
+
+    ok = compute_transfer_tax(case, _sell(OLD), rs, track=Track.CURRENT)
+    assert ok.total.as_int() == 0, "요건을 갖춘 종전주택 양도인데 비과세가 아니다"
+    assert "§155①" in ok.trace.find("tr.01.house_count").branch.taken
+
+    # 신규주택을 팔면 특례가 아니다 — 조문이 '종전의 주택을 양도하는 경우'라 못 박는다
+    wrong = compute_transfer_tax(case, _sell(NEW), rs, track=Track.CURRENT)
+    assert wrong.total.as_int() > 0
+    assert "2주택" in wrong.trace.find("tr.01.house_count").branch.taken
+
+
+def test_일시적_2주택_기간_요건을_못_채우면_적용하지_않는다(rs: RuleSet):
+    """두 기간 요건이 각각 독립적으로 특례를 죽인다."""
+    # 종전주택 취득 1년 안에 신규 취득 → 요건 미충족
+    early = _two_acquisitions(date(2025, 3, 1), date(2025, 9, 1))
+    assert compute_transfer_tax(early, _sell(OLD), rs, track=Track.CURRENT).total.as_int() > 0
+
+    # 신규 취득 후 3년이 지나 양도 → 요건 미충족
+    late = _two_acquisitions(date(2015, 3, 1), date(2023, 1, 1))
+    assert compute_transfer_tax(late, _sell(OLD), rs, track=Track.CURRENT).total.as_int() > 0
+
+
+def test_확인이_필요한_특례는_적용하지_않고_알린다(rs: RuleSet):
+    """주택 수를 줄이는 특례는 세액을 **낮춘다.**
+
+    확인하지 못한 채 적용하면 과소신고가 되고 가산세가 붙는다. 그래서 사실만으로
+    전부 판정되는 것만 적용하고, 나머지는 적용하지 않되 무엇을 확인해야 하는지 말한다.
+    """
+    case = _two_acquisitions(date(2015, 3, 1), date(2023, 1, 1))
+    result = compute_transfer_tax(case, _sell(OLD), rs, track=Track.CURRENT)
+    alts = {a.key: a for a in result.trace.all_alternatives()}
+    assert "income_tax_house_count_special" in alts
+    assert alts["income_tax_house_count_special"].actionable
+    assert "§155①" in alts["income_tax_house_count_special"].reason_ko
