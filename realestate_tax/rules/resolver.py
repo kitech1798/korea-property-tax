@@ -44,13 +44,22 @@ class Resolution:
     context: Mapping[str, Any]
     rejected: tuple[tuple[RuleBlock, str], ...] = ()
     """탈락한 블록과 사유. 룰셋 디버깅과 화면의 '왜 이 규칙인가' 설명에 쓴다."""
+    fell_back_to_current: bool = False
+    """개편안 트랙인데 그 시점에 개편안 조항이 아직 시행 전이라 현행 조문을 쓴 경우.
+
+    "개편안이 통과된다고 가정해도 이 항목은 아직 현행법과 같다"는 뜻이다.
+    화면이 이 사실을 밝혀야 사용자가 '왜 숫자가 그대로지?'에서 막히지 않는다.
+    """
 
     @property
     def value(self) -> Any:
         return self.block.value
 
     def ref(self):
-        return self.block.to_ref(self.track)
+        # 실제로 적용한 것은 현행 조문이다. 개편안 배지를 붙이면 거짓이 된다.
+        return self.block.to_ref(
+            Track.CURRENT if self.fell_back_to_current else self.track
+        )
 
 
 class RuleSet:
@@ -157,6 +166,12 @@ class RuleSet:
         rejected: list[tuple[RuleBlock, str]] = []
         matched: list[RuleBlock] = []
 
+        # ★ 개편안 블록이 왜 떨어졌는지를 구분해 둔다.
+        #     입력이 없어서(missing)  → 시행일 폴백을 **막아야 한다**. 입력 부족이다.
+        #     값이 달라서(mismatch)   → 그냥 이 케이스가 아닌 블록이다. 막을 이유 없다.
+        #   이걸 뭉뚱그리면 무관한 블록(예: 법인용) 하나가 폴백을 통째로 막는다.
+        blocked_by_missing_input = False
+
         for block in rule.blocks:
             if track not in block.tracks:
                 rejected.append((block, f"트랙 불일치(요청 {track})"))
@@ -166,10 +181,51 @@ class RuleSet:
                     (block, f"시행기간 밖({block.effective_from}~{block.effective_to})")
                 )
                 continue
-            if not block.selector.matches(context):
-                rejected.append((block, f"조건 불일치({block.selector.describe_ko()})"))
+            missing = block.selector.missing_keys(context)
+            if missing or block.selector.mismatched_keys(context):
+                why = (
+                    f"입력 없음({', '.join(missing)})" if missing
+                    else f"조건 불일치({block.selector.describe_ko()})"
+                )
+                rejected.append((block, why))
+                blocked_by_missing_input = blocked_by_missing_input or bool(missing)
                 continue
             matched.append(block)
+
+        if not matched and track is Track.REFORM and not blocked_by_missing_input:
+            # ★ 개편안 트랙인데 그 날짜에 맞는 개편안 블록이 없다 = **아직 시행 전**이다.
+            #
+            #   개편안은 현행법을 통째로 갈아치우는 게 아니라 **일부 조항을 개정**한다.
+            #   개정 조항에는 각각 시행일이 붙고(대부분 2027.1.1. 이후 성립분),
+            #   시행일 전까지는 현행 조문이 그대로 적용된다.
+            #   그러니 "2026년에 개편안이 통과됐다고 가정하면?"의 답은
+            #   **"보유세는 현행법과 같다"**이지 "계산할 수 없다"가 아니다.
+            #
+            #   묵시적 기본값 금지 원칙과 충돌하지 않는다 — 이건 기본값을 지어내는 게
+            #   아니라 **시행일의 의미**를 그대로 구현한 것이다. 어느 블록으로 갔는지는
+            #   Resolution.fell_back_to_current 로 드러나 화면과 감사추적에 남는다.
+            #
+            # ⚠️ **조건 때문에 떨어진 경우에는 절대 폴백하지 않는다.**
+            #   개편안 블록이 날짜는 맞는데 selector에서 떨어졌다면 그건 '시행 전'이
+            #   아니라 **입력이 모자란 것**이다. 여기서 현행 블록으로 넘어가면
+            #   거주 여부를 모르는데 12억을 골라주게 된다 — 시중 계산기의 실패 그 자체다.
+            #   (이 폴백을 처음 넣었을 때 실제로 그렇게 됐고, 테스트가 잡았다.)
+            for block in rule.blocks:
+                if Track.CURRENT not in block.tracks:
+                    continue
+                if not block.applies_on(on):
+                    continue
+                if not block.selector.matches(context):
+                    continue
+                matched.append(block)
+            if matched:
+                top = max(b.selector.specificity for b in matched)
+                winners = [b for b in matched if b.selector.specificity == top]
+                if len(winners) == 1:
+                    return Resolution(
+                        winners[0], track, on, dict(context), tuple(rejected),
+                        fell_back_to_current=True,
+                    )
 
         if not matched:
             raise MissingRule(self._explain_missing(rule_id, on, track, context, rejected))
