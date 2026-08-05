@@ -1,0 +1,79 @@
+# 비거주 기간을 거주기간으로 간주하는 사유.
+#
+# 2026 개편안이 보유공제를 거주공제로 바꾸면서 넣은 완충장치다.
+# 이게 없으면 전근·유학 간 사람이 전부 벌을 받는다.
+#
+# ⚠️ **위험한 방향의 규칙이다.** 거주기간을 늘려 세금을 줄이므로, 상한과 요건을
+#    빠뜨리면 과소신고가 된다. 실제로 엔진이 `ImputedResidenceReason`을 아예
+#    읽지 않아 인정 구간이 **상한 없이** 전부 거주로 세어지고 있었다(2026-08-05).
+#
+# 출처: 2026년 세제개편안 개조식 p.22 원문
+#   "【 비거주한 기간을 거주기간으로 간주하는 사유(양도세·종부세) 】
+#    ※ 양도소득세: ➊,➋,➌,➍ 적용 / 종합부동산세: ➊,➋ 적용
+#    ➊ 1년 이상 계속하여 거주 중인 주택에서 부득이한 사유로 다른 시·군으로
+#      주거이전 시 이로 인한 비거주기간을 거주기간으로 인정(최장 3년)
+#      * 취학(고등학교·대학교), 직장변경·전근, 질병(1년 이상 치료·요양),
+#        전학(학교폭력 피해), 해외체류(취학·직장변경·전근),
+#        부모봉양(60세 이상 직계존속 동거봉양) 등
+#    ➋ 재개발·재건축으로 취득한 신축주택은 정비사업으로 인한 공사기간의 1/2을
+#      거주기간으로 인정
+#      * 관리처분계획 인가일 현재 1년 이상 거주 중인 주택
+#      ** 관리처분계획 인가일부터 신축주택 입주가능일까지 기간"
+#
+#   적용시기 — **세목마다 다르다**
+#     종부세  '27.1.1. 이후 납세의무 성립분  (거주공제 공제율 + 기본공제 거주용 판정)
+#     양도세  '28.1.1. 이후 양도분           (장기거주소득공제 공제율)
+
+---
+rule_id: reference.imputed_residence
+unit: spec
+description: |
+  부득이한 사유 등으로 비거주한 기간을 거주기간으로 인정하는 범위.
+
+  `reasons_*`는 도메인 `ImputedResidenceReason`의 값과 이름이 같아야 한다 —
+  룰셋과 코드가 다른 이름을 쓰면 대조가 불가능해진다.
+
+  ⚠️ ➌(특례주택 보유기간)·➍(등록임대 임대기간)는 **양도세에만** 적용되고
+     요건이 별도라 아직 담지 않았다. 담은 척하지 않는다.
+blocks:
+  - id: imputed-jongbuse-2027
+    tracks: [reform]
+    effective_from: 2027-01-01
+    selector: {tax: jongbuse}
+    basis: {law: 종합부동산세법, article: "9", clause: "10"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 22}
+    certainty: bill_pending
+    payload:
+      max_years: 3
+      requires_prior_residence_years: 1
+      reasons:
+        - schooling
+        - job_transfer
+        - illness
+        - school_violence
+        - overseas
+        - elder_care
+      reconstruction_ratio: "1/2"
+      note_ko: "종합부동산세는 ➊·➋만 적용됩니다(개조식 p.22)."
+
+  - id: imputed-transfer-2028
+    tracks: [reform]
+    effective_from: 2028-01-01
+    selector: {tax: transfer}
+    basis: {law: 소득세법, article: "95", clause: "2"}
+    source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 22}
+    certainty: bill_pending
+    payload:
+      max_years: 3
+      requires_prior_residence_years: 1
+      reasons:
+        - schooling
+        - job_transfer
+        - illness
+        - school_violence
+        - overseas
+        - elder_care
+      reconstruction_ratio: "1/2"
+      note_ko: |
+        양도소득세는 ➌(주택수 제외 특례주택 보유기간)·➍(등록임대 임대기간, 연2% 최대30%)도
+        적용되지만 요건이 별도라 이 엔진은 아직 판정하지 않습니다.

@@ -538,6 +538,8 @@ def _derive_periods(
     person_id: PersonId,
     assessment: SpecialAssessment,
     on: date,
+    ruleset: RuleSet,
+    track: Track,
 ) -> tuple[int | None, int | None, str]:
     """보유기간·거주기간을 **사건의 사실에서** 도출한다.
 
@@ -565,7 +567,11 @@ def _derive_periods(
         case, person_id, main, on, declared_years=options.holding_years
     )
     residence = periods.residence_years(
-        case, person_id, main, on, declared=options.residence_years
+        case, person_id, main, on,
+        declared=options.residence_years,
+        # 인정 구간(전근·유학 등)은 **근거 규칙이 있을 때만** 센다.
+        # 규칙이 없는데 인정해 주면 거주기간이 부풀어 과소신고가 된다.
+        imputed=periods.imputed_spec(ruleset, tax="jongbuse", on=on, track=track),
     )
 
     source = []
@@ -1295,7 +1301,7 @@ def _tax_credit(
     hold_res = ruleset.resolve(f"{J}.credit_holding", on=on, track=track)
     payload = hold_res.block.payload
     holding_years, residence_years, derived_from = _derive_periods(
-        options, case, person_id, assessment, on
+        options, case, person_id, assessment, on, ruleset, track
     )
 
     mode = payload.get("mode", "holding_only")
