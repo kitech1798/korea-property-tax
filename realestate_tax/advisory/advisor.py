@@ -122,17 +122,10 @@ def build_context(
 
     if result is not None:
         credit = result.trace.find("jb.10.tax_credit")
-        ctx["resides"] = _resides_flag(result)
+        ctx["resides"] = result.resides
         if credit is not None and credit.branch is not None:
             ctx.setdefault("residence_years", None)
     return ctx
-
-
-def _resides_flag(result: JongbuseResult) -> bool:
-    node = result.trace.find("jb.06.basic_deduction")
-    if node is None or node.branch is None:
-        return False
-    return "비거주" not in node.branch.taken and "거주" in node.branch.taken
 
 
 def build_values(result: JongbuseResult | None, extra: Mapping[str, Any] | None = None) -> dict[str, str]:

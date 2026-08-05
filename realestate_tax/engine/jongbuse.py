@@ -108,6 +108,15 @@ class JongbuseResult:
     total: Value
     property_tax_total: Value
     trace: TraceNode
+    resides: bool = False
+    """기준이 되는 1주택에 과세기준일 현재 거주하는가.
+
+    ★ 판정 결과를 **값으로** 내보낸다. 예전에는 상담 계층이 기본공제 노드의
+      화면 문구("… · 거주")를 파싱해 이 불리언을 되찾았는데, 문구가 붙는
+      조건(개편안 + 1세대1주택)이 좁아 부부공동명의에서 조용히 False가 됐다.
+      **표시용 문자열은 계산 결과의 저장소가 아니다.**
+    """
+    resides_reason_ko: str = ""
 
     @property
     def holding_tax_total(self) -> Won:
@@ -195,7 +204,7 @@ def compute_jongbuse(
     # ★ 개편안은 과세대상 문턱과 기본공제를 **분리**한다. 비거주 1주택은
     #   문턱 14억 / 기본공제 9억이라 9억~14억 구간에서 둘이 어긋난다.
     #   기본공제만 보고 계산하면 과세대상이 아닌 사람에게 세금을 매긴다.
-    resides = _resides(options, one_house)
+    resides, resides_why = _resides(options, case, person_id, assessment, on)
     threshold_node = _taxable_threshold(
         ruleset, on, track, taxpayer, one_house, assessed, subject
     )
@@ -203,12 +212,14 @@ def compute_jongbuse(
         children.append(threshold_node)
         if threshold_node.output.as_int() == 0:  # 문턱 이하 → 종부세 없음
             return _not_taxable_result(
-                case, person_id, person, track, subject, children, pt_results
+                case, person_id, person, track, subject, children, pt_results,
+                resides=resides, resides_why=resides_why,
             )
 
     # ── 06. 기본공제 ───────────────────────────────────────────────
     deduction, ded_node = _basic_deduction(
-        ruleset, on, track, taxpayer, one_house, resides, case, person_id, subject
+        ruleset, on, track, taxpayer, one_house, resides, case, person_id, subject,
+        resides_why=resides_why,
     )
     children.append(ded_node)
 
@@ -375,6 +386,8 @@ def compute_jongbuse(
         total=total,
         property_tax_total=pt_total,
         trace=trace,
+        resides=resides,
+        resides_reason_ko=resides_why,
     )
 
 
@@ -460,15 +473,44 @@ def compare_joint_spouse_election(
 # --------------------------------------------------------------------------
 
 
-def _resides(options: JongbuseOptions, one_house: bool) -> bool:
-    """거주 여부. 모르면 **거주하지 않는 것으로 본다**.
+def _resides(
+    options: JongbuseOptions,
+    case: TaxCase,
+    person_id: PersonId,
+    assessment: SpecialAssessment,
+    on: date,
+) -> tuple[bool, str]:
+    """거주 여부와 그 근거. 모르면 **거주하지 않는 것으로 본다**.
 
     개편안에서 거주 여부는 기본공제 14억 vs 9억을 가른다. 모를 때 유리한 쪽으로
     가정하면 세액을 과소평가해 사용자를 오도한다. 대표값은 항상 보수적으로 둔다.
+
+    ★ 다만 **아는 것을 모르는 척해도 안 된다**(2026-08-04 발견).
+      도메인이 `ResidenceSpell`을 1급 엔티티로 두고 있는데 엔진이 읽지 않아,
+      거주 이력을 입력해도 옵션을 따로 주지 않으면 비거주로 계산됐다.
+      '모르면 보수적으로'와 '알아도 무시'는 다른 것이다.
+
+    ★ 판정 대상은 **기존 1주택**이다(문답자료 p.40). 상속주택 같은 특례주택에
+      살고 있어도 본래 주택이 비어 있으면 비거주다.
     """
     if options.resides_in_main_house is not None:
-        return options.resides_in_main_house
-    return False
+        return options.resides_in_main_house, "입력값"
+
+    main = assessment.main_property_id
+    if main is None:
+        return False, "기준이 되는 1주택이 없어 판정하지 않음"
+
+    members = set(case.household_member_ids(person_id))
+    lives = any(
+        spell.covers(on)
+        for m in members
+        for spell in case.residences_of(m, main)
+    )
+    if lives:
+        return True, "거주 이력"
+    if any(case.residences_of(m, main) for m in members):
+        return False, "거주 이력은 있으나 과세기준일에 걸치지 않음"
+    return False, "거주 사실 미입력 — 유리한 쪽으로 가정하지 않음"
 
 
 def _taxable_threshold(
@@ -539,6 +581,8 @@ def _not_taxable_result(
     subject: SubjectRef,
     children: list[TraceNode],
     pt_results,
+    resides: bool = False,
+    resides_why: str = "",
 ) -> "JongbuseResult":
     """과세대상이 아닐 때의 결과. 재산세는 그대로 살아 있다."""
     zero = Value.money(0, label="종합부동산세")
@@ -577,6 +621,8 @@ def _not_taxable_result(
         total=zero,
         property_tax_total=pt_total,
         trace=trace,
+        resides=resides,
+        resides_reason_ko=resides_why,
     )
 
 
@@ -828,6 +874,8 @@ def _basic_deduction(
     case: TaxCase,
     person_id: PersonId,
     subject: SubjectRef,
+    *,
+    resides_why: str = "",
 ) -> tuple[Value, TraceNode]:
     ctx: dict[str, object] = {"taxpayer": taxpayer}
     if taxpayer == "individual":
@@ -851,7 +899,12 @@ def _basic_deduction(
             branch=BranchRecord(
                 condition_ko="1세대1주택자 / 거주 여부",
                 taken=f"{'1세대1주택' if one_house else '그 외'}"
-                + (f" · {'거주' if resides else '비거주'}" if track is Track.REFORM and one_house else ""),
+                + (
+                    f" · {'거주' if resides else '비거주'}"
+                    + (f"({resides_why})" if resides_why else "")
+                    if track is Track.REFORM and one_house
+                    else ""
+                ),
             ),
         )
 
