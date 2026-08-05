@@ -7,10 +7,11 @@ secondaryBackgroundColor = "#ffffff"
 textColor = "#14181f"
 
 [server]
-port = 8555
-headless = true
 # 이 앱은 사용자가 입력한 값만 다루고 파일 업로드가 없다.
 maxUploadSize = 1
+# ⚠️ port·headless는 여기 두지 않는다. 배포 환경이 자기 포트를 배정하므로
+#    커밋된 설정이 그걸 덮으면 안 된다. 로컬은 명령줄에서 지정한다:
+#      streamlit run app.py --server.port 8555
 
 [browser]
 gatherUsageStats = false
