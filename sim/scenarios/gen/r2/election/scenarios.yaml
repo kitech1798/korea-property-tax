@@ -1,0 +1,394 @@
+# 2회차 · 앵글: 부부공동명의 특례(joint_spouse_special) — Election이 이제 읽힌다
+#
+# 1회차에서 사건에 적은 Election을 엔진이 무시했다. 그 경로를 밟는다.
+# 판정 결과는 적지 않는다. 보유·거주기간도 (10번을 뺀) 전 건에서 직접 쓰지 않고
+# 취득일과 거주 이력만 준다.
+
+id: election-01
+label: 부부 반반 공동명의 1주택 · 본인(p1)을 지정납세자로 신청
+origin: election-agent
+intent: |
+  가장 기본형 경로. elections에 joint_spouse_special을 적고 designated_taxpayer를
+  subject 본인으로 둔다. 1회차에서는 이 줄이 통째로 무시됐다.
+  신청이 읽히면 인별 각자 합산(각 절반)이 아니라 지정납세자 1인에게 주택 전부가
+  귀속되어야 한다. 두 계산이 같은 값이면 election이 여전히 안 읽히는 것이다.
+expectation: |
+  p1 한 사람에게 주택 전체가 귀속된 형태로 과세표준이 잡힌다.
+  p2는 이 주택으로 인한 종부세 납세의무를 지지 않는다.
+tags: [부부공동명의, 특례신청, 지정납세자, 기본경로]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1968-05-11, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1971-09-23, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: joint
+    name: 역삼 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    area_m2: 84.9
+    prices: {2026: 2_000_000_000}
+ownerships:
+  - {person: p1, property: joint, share: "1/2", acquired: 2014-03-10}
+  - {person: p2, property: joint, share: "1/2", acquired: 2014-03-10}
+residences:
+  - {person: p1, property: joint, start: 2014-03-10}
+  - {person: p2, property: joint, start: 2014-03-10}
+elections:
+  - {person: p1, kind: joint_spouse_special, year: 2026, designated_taxpayer: p1}
+
+---
+
+id: election-02
+label: 같은 집 · 지정납세자를 고령 배우자(p2)로 — 지정 대상이 바뀌면 결과도 바뀌는가
+origin: election-agent
+intent: |
+  election-01과 사실관계는 동일하고 designated_taxpayer만 p2로 바꿨다.
+  p2는 고령·장기거주자다. 지정이 실제로 읽힌다면 연령·보유 세액공제가
+  p2 기준으로 산정되어 election-01과 세액이 달라야 한다.
+  두 건이 같은 값이면 designated_taxpayer가 무시되고 있다는 뜻이다.
+expectation: |
+  election-01과 세액이 서로 다르다. p2 기준의 연령·보유 세액공제가 붙어
+  election-01보다 세부담이 낮은 쪽으로 갈린다.
+tags: [부부공동명의, 지정납세자, 배우자지정, 세액공제귀속]
+year: 2026
+subject: p2
+persons:
+  - {id: p1, name: 남편, birth: 1985-02-14, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1952-11-30, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: joint
+    name: 잠실 아파트
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2026: 2_000_000_000}
+ownerships:
+  - {person: p1, property: joint, share: "1/2", acquired: 2014-03-10}
+  - {person: p2, property: joint, share: "1/2", acquired: 2014-03-10}
+residences:
+  - {person: p1, property: joint, start: 2014-03-10}
+  - {person: p2, property: joint, start: 2014-03-10}
+elections:
+  - {person: p1, kind: joint_spouse_special, year: 2026, designated_taxpayer: p2}
+
+---
+
+id: election-03
+label: 지정납세자 생략 + auto_optimize · 누구를 고르는가
+origin: election-agent
+intent: |
+  designated_taxpayer를 비우고 auto_optimize만 켠다. 신청 사실은 있는데
+  지정이 없는 상태에서 엔진이 (a) 명세 오류를 내는지 (b) 임의로 한 명을 고르는지
+  (c) 신청 자체를 버리는지 본다. 세 결과 모두 관측 가치가 있다.
+  같은 세대에 양도까지 얹어, 고친 취득일 경로도 함께 밟는다.
+expectation: |
+  신청이 살아 있다면 부부 중 한 명에게 주택 전부가 귀속된다.
+  양도 쪽은 취득일에서 보유기간이 도출되어 장기보유 구간에 들어가고,
+  전 기간 거주가 있으므로 거주요건 미충족으로 탈락하지 않는다.
+tags: [부부공동명의, auto_optimize, 지정생략, 양도]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1972-07-04, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1974-01-19, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: joint
+    name: 분당 아파트
+    kind: apartment
+    dong: "4113510100"
+    urban: true
+    prices: {2026: 1_800_000_000}
+ownerships:
+  - {person: p1, property: joint, share: "1/2", acquired: 2015-04-01}
+  - {person: p2, property: joint, share: "1/2", acquired: 2015-04-01}
+residences:
+  - {person: p1, property: joint, start: 2015-04-01}
+  - {person: p2, property: joint, start: 2015-04-01}
+elections:
+  - {person: p1, kind: joint_spouse_special, year: 2026, auto_optimize: true}
+transfer:
+  property: joint
+  person: p1
+  date: 2026-08-20
+  price: 2_400_000_000
+  acquisition_price: 1_000_000_000
+  acquisition_date: 2015-04-01
+  necessary_expense: 25_000_000
+  share: "1/2"
+
+---
+
+id: election-04
+label: 배우자(p2)가 신청하고 본인(p1)을 지정 — 신청자 ≠ 지정자
+origin: election-agent
+intent: |
+  elections.person과 designated_taxpayer를 서로 다른 사람으로 둔다.
+  엔진이 "신청한 사람"을 납세자로 착각하는지, 아니면 "지정된 사람"을 쓰는지 가른다.
+  subject는 지정된 쪽(p1)이다. p1이 납세의무자가 아니면 지정이 안 읽힌 것이다.
+expectation: |
+  납세의무는 지정된 p1에게 붙는다. 신청자인 p2에게 붙어 나오면 안 된다.
+  p1 단독 계산이므로 주택 전체가 p1의 과세표준을 이룬다.
+tags: [부부공동명의, 신청자와지정자분리, 지정납세자]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1966-12-01, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1969-04-08, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: joint
+    name: 한남 주택
+    kind: detached
+    dong: "1117010100"
+    urban: true
+    prices: {2026: 2_600_000_000}
+ownerships:
+  - {person: p1, property: joint, share: "2/5", acquired: 2013-06-15}
+  - {person: p2, property: joint, share: "3/5", acquired: 2013-06-15}
+residences:
+  - {person: p1, property: joint, start: 2013-06-15}
+  - {person: p2, property: joint, start: 2013-06-15}
+elections:
+  - {person: p2, kind: joint_spouse_special, year: 2026, designated_taxpayer: p1}
+
+---
+
+id: election-05
+label: year를 2028로 못박은 신청 — 4년 타임라인 중 그 해만 갈리는가
+origin: election-agent
+intent: |
+  years로 2026~2029를 돌리면서 elections.year를 2028 하나로 지정한다.
+  신청이 전 연도로 새면 4년이 전부 같은 형태가 되고, 연도 필드가 읽히면
+  2028년만 단독 귀속으로 튄다. 연도 스코프가 실제로 작동하는지의 시금석.
+expectation: |
+  2026·2027·2029는 부부 각자 지분대로 인별 계산되고, 2028만 p1 단독 귀속으로
+  형태가 바뀐다. 2028의 세액이 인접 연도와 불연속을 이룬다.
+tags: [부부공동명의, 연도스코프, 타임라인]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+growth: 0.0
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1963-08-22, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1965-03-17, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: joint
+    name: 하남 아파트
+    kind: apartment
+    dong: "4145010100"
+    urban: true
+    prices: {2026: 2_200_000_000}
+ownerships:
+  - {person: p1, property: joint, share: "1/2", acquired: 2012-02-20}
+  - {person: p2, property: joint, share: "1/2", acquired: 2012-02-20}
+residences:
+  - {person: p1, property: joint, start: 2012-02-20}
+  - {person: p2, property: joint, start: 2012-02-20}
+elections:
+  - {person: p1, kind: joint_spouse_special, year: 2028, designated_taxpayer: p1}
+
+---
+
+id: election-06
+label: 신청이 명백히 불리한 구간 — 젊은 부부·반반·각자 기본공제 아래
+origin: election-agent
+intent: |
+  둘 다 젊어 연령공제가 없고 지분이 정확히 반반이라, 각자 인별 기본공제를 쓰면
+  과세표준이 서지 않는 구간이다. 여기서 특례를 신청하면 한 사람에게 전부 몰려
+  과세표준이 생긴다. 즉 신청이 손해다.
+  핵심 검사: 엔진이 "유리한 쪽"으로 몰래 갈아타지 않고 신청한 대로 계산하는가.
+  손해인데도 신청 결과가 그대로 나와야 정직한 엔진이다.
+expectation: |
+  신청한 대로 p1 단독 귀속으로 계산되어, 각자 인별로 계산했을 때보다 세부담이
+  높거나 최소한 낮지 않다. 엔진이 자동으로 미신청 결과로 되돌리면 안 된다.
+tags: [부부공동명의, 불리한신청, 자동최적화금지, 정직성]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1988-06-30, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1990-10-05, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: joint
+    name: 화곡 아파트
+    kind: apartment
+    dong: "1150010100"
+    urban: true
+    prices: {2026: 1_600_000_000}
+ownerships:
+  - {person: p1, property: joint, share: "1/2", acquired: 2021-11-12}
+  - {person: p2, property: joint, share: "1/2", acquired: 2021-11-12}
+residences:
+  - {person: p1, property: joint, start: 2021-11-12}
+  - {person: p2, property: joint, start: 2021-11-12}
+elections:
+  - {person: p1, kind: joint_spouse_special, year: 2026, designated_taxpayer: p1, auto_optimize: false}
+
+---
+
+id: election-07
+label: 요건 미충족 신청 ① — 부부가 각자 다른 집 1채씩(공동명의가 아님)
+origin: election-agent
+intent: |
+  공동 소유 주택이 한 채도 없는데 joint_spouse_special을 신청한다.
+  특례는 "부부가 1주택을 공동으로 소유"할 때의 제도다. 전제가 없다.
+  엔진이 (a) 신청을 기각하고 인별 계산으로 가는지 (b) 조용히 한 명에게 두 채를
+  몰아 3주택급으로 만드는지 (c) 예외로 죽는지 본다. (b)가 최악의 결과다.
+expectation: |
+  신청이 요건 미충족으로 무력화되고, 각자 자기 집만 가진 인별 1주택 계산이 남는다.
+  두 집이 한 사람에게 합산되어서는 안 된다.
+tags: [부부공동명의, 요건미충족, 각자단독, 기각경로]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1970-03-05, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1972-08-19, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - {id: seoul, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 1_400_000_000}}
+  - {id: busan, kind: apartment, dong: "2647010100", urban: true, prices: {2026: 900_000_000}}
+ownerships:
+  - {person: p1, property: seoul, share: 1, acquired: 2015-04-01}
+  - {person: p2, property: busan, share: 1, acquired: 2019-11-20}
+residences:
+  - {person: p1, property: seoul, start: 2015-04-01}
+elections:
+  - {person: p1, kind: joint_spouse_special, year: 2026, designated_taxpayer: p1}
+
+---
+
+id: election-08
+label: 요건 미충족 신청 ② — 공동명의 1채 + 각자 단독 1채씩(세대 3주택)
+origin: election-agent
+intent: |
+  공동명의 주택은 존재하지만 부부가 추가로 한 채씩 더 갖고 있다.
+  1주택 특례의 "1주택" 요건이 깨진 상태에서 신청이 들어온 경우다.
+  기각되어야 정상인데, 신청이 그대로 먹히면 공동명의분만 한 명에게 몰려
+  나머지 두 채와 합산되는 기묘한 형태가 나올 수 있다. 거기를 본다.
+expectation: |
+  1주택 요건 미충족으로 특례가 적용되지 않는다. 인별 다주택 계산이 되고,
+  1주택자 전용 공제(고령·장기보유)는 붙지 않는다.
+tags: [부부공동명의, 요건미충족, 3주택, 다주택]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1967-01-25, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1969-05-13, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - {id: joint, kind: apartment, dong: "1168010100", urban: true, prices: {2026: 1_800_000_000}}
+  - {id: solo1, kind: apartment, dong: "1171010100", urban: true, prices: {2026: 1_200_000_000}}
+  - {id: solo2, kind: apartment, dong: "2647010100", urban: true, prices: {2026: 600_000_000}}
+ownerships:
+  - {person: p1, property: joint, share: "1/2", acquired: 2013-09-01}
+  - {person: p2, property: joint, share: "1/2", acquired: 2013-09-01}
+  - {person: p1, property: solo1, share: 1, acquired: 2018-04-17}
+  - {person: p2, property: solo2, share: 1, acquired: 2022-07-02}
+residences:
+  - {person: p1, property: joint, start: 2013-09-01}
+  - {person: p2, property: joint, start: 2013-09-01}
+elections:
+  - {person: p1, kind: joint_spouse_special, year: 2026, designated_taxpayer: p1}
+
+---
+
+id: election-09
+label: 신청 + 고령 + 장기거주인데 지정납세자는 젊은 배우자 — 공제가 누구 것으로 계산되나
+origin: election-agent
+intent: |
+  주택 전체 기여는 고령·장기거주자인 p1 쪽인데, 지정납세자를 젊은 p2로 둔다.
+  연령·장기보유 세액공제가 "지정납세자 1인 기준"으로 계산된다면 공제가 거의
+  사라져야 한다. 반대로 세대 전체나 배우자 사실을 끌어와 공제를 크게 주면,
+  공제 귀속 주체가 잘못 잡힌 것이다. 공제 산정 주체를 정확히 조준한 건.
+  참고로 p1은 취득·거주가 길고 p2는 혼인으로 뒤늦게 지분을 받았다.
+expectation: |
+  세액공제가 p2의 연령·보유 사실만으로 산정되어, 같은 사실관계에서 p1을 지정했을
+  경우보다 공제가 작다(또는 없다). p1의 고령·장기거주가 p2에게 이전되지 않는다.
+tags: [부부공동명의, 고령자공제, 장기보유공제, 공제귀속, 지정납세자]
+year: 2026
+subject: p2
+persons:
+  - {id: p1, name: 남편, birth: 1954-06-15, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1982-12-09, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: joint
+    name: 동탄 아파트
+    kind: apartment
+    dong: "4159710100"
+    urban: true
+    prices: {2026: 2_800_000_000}
+ownerships:
+  - {person: p1, property: joint, share: "1/2", acquired: 2008-03-01}
+  - {person: p2, property: joint, share: "1/2", acquired: 2023-05-20, cause: gift}
+residences:
+  - {person: p1, property: joint, start: 2008-03-01}
+  - {person: p2, property: joint, start: 2023-05-20}
+elections:
+  - {person: p1, kind: joint_spouse_special, year: 2026, designated_taxpayer: p2}
+
+---
+
+id: election-10
+label: "지분 999/1000 대 1/1000 극단 비대칭 + 지정 생략 + 양도기간 명시가 취득일을 이기는가"
+origin: election-agent
+intent: |
+  두 가지를 한 건에 겹친다.
+  ① 지분이 999:1로 극단 비대칭인 공동명의에 특례를 신청하면서 지정납세자를 비웠다.
+     "공동 소유"의 실질을 지분 하한 없이 그대로 받는지, 미미한 지분을 무시하는지 본다.
+  ② transfer에 acquisition_date(2010년)와 모순되는 holding_years: 1을 함께 적었다.
+     이번 회차의 수정 지점이 취득일 도출이므로, 명시값과 도출값이 부딪칠 때
+     어느 쪽이 이기는지가 관측 대상이다. 명시가 이기면 단기 세율 구간으로,
+     도출이 이기면 장기보유 구간으로 갈린다. 둘이 섞이면(세율은 단기, 공제는 장기)
+     그게 가장 나쁜 신호다.
+expectation: |
+  종부세 쪽은 999/1000 지분자와 1/1000 지분자가 공동 소유로 인정되는지에 따라
+  결과 형태가 갈린다. 양도 쪽은 보유기간이 한 값으로만 일관되게 쓰여야 하고,
+  세율 구간과 장기보유공제가 서로 다른 보유기간을 참조하면 안 된다.
+tags: [부부공동명의, 극단지분, 지정생략, 양도, 명시대도출, 모순입력]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 남편, birth: 1975-04-04, household: h1, spouse: p2}
+  - {id: p2, name: 아내, birth: 1977-08-08, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: joint
+    name: 역삼 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 3_000_000_000}
+ownerships:
+  - {person: p1, property: joint, share: "999/1000", acquired: 2010-01-01}
+  - {person: p2, property: joint, share: "1/1000", acquired: 2010-01-01}
+residences:
+  - {person: p1, property: joint, start: 2010-01-01}
+elections:
+  - {person: p1, kind: joint_spouse_special, year: 2026}
+transfer:
+  property: joint
+  person: p1
+  date: 2026-10-15
+  price: 3_600_000_000
+  acquisition_price: 1_200_000_000
+  acquisition_date: 2010-01-01
+  necessary_expense: 40_000_000
+  share: "999/1000"
+  holding_years: 1

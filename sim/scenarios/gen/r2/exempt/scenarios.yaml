@@ -1,0 +1,449 @@
+# 2회차 · 1세대1주택 비과세 — 보유기간이 처음으로 도출되는 곳
+#
+# 1회차에는 양도세 엔진이 취득일을 읽지 못해 보유기간이 항상 None이었고,
+# 비과세 · 장특공제 · 세율분기가 전부 단락됐다. 그 아래 트리가 이제 처음
+# 도달 가능해졌다. 아래 10건은 그 트리의 진입점만 골라 때린다.
+#
+# 보유·거주기간은 원칙적으로 쓰지 않는다(취득일과 거주 이력만 준다).
+# 예외 2건(exempt-02, exempt-08)만 일부러 명시해 "명시가 도출을 이기는가"를 본다.
+
+id: exempt-01
+label: 보유 2년 정확히 채운 날 양도 · 비조정 · 12억 이하
+origin: exempt-agent
+intent: |
+  비과세 보유 2년 요건의 하한을 정확히 딛는다. 취득 2024-03-15 → 양도 2026-03-15.
+  1회차에는 보유기간이 None이라 이 문이 열린 적이 없다. 취득일에서 보유기간이
+  실제로 도출되는지, 그리고 도출된 값이 요건 문턱을 넘기는지 확인한다.
+  비조정지역이라 거주 요건은 붙지 않아야 한다.
+expectation: |
+  보유기간이 취득일에서 도출되어 2년 요건을 충족하고, 양도가액이 12억 이하이므로
+  고가주택 안분 없이 양도차익 전액이 비과세된다. 산출세액은 0이어야 한다.
+tags: [비과세, 보유2년, 경계, 비조정]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 갑, birth: 1980-05-05, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan1
+    name: 해운대 아파트
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    area_m2: 84.9
+    prices: {2026: 600_000_000}
+ownerships:
+  - {person: p1, property: busan1, share: 1, acquired: 2024-03-15, cause: purchase}
+residences:
+  - {person: p1, property: busan1, start: 2024-03-15}
+transfer:
+  property: busan1
+  person: p1
+  date: 2026-03-15
+  price: 900_000_000
+  acquisition_price: 500_000_000
+  acquisition_date: 2024-03-15
+  necessary_expense: 10_000_000
+  share: 1
+
+---
+
+id: exempt-02
+label: 보유 2년 하루 모자란 날 양도 · 그런데 holding_years는 2로 명시
+origin: exempt-agent
+intent: |
+  exempt-01과 단 하루만 다르다(양도 2026-03-14). 초일산입을 하면 2년이 차고,
+  안 하면 하루 모자란다 — 요건 경계가 어느 쪽에 서 있는지 드러나는 지점이다.
+  동시에 holding_years: 2를 일부러 명시해, 명시값이 취득일 도출을 이기는지
+  (또는 모순으로 잡히는지) 본다. 두 신호가 반대 방향을 가리키게 만든 모순 케이스다.
+expectation: |
+  01과 하루 차이인데 결과가 뒤집히거나 뒤집히지 않거나 둘 중 하나로 일관돼야 한다.
+  명시 holding_years와 취득일 도출값이 충돌할 때 어느 쪽이 채택됐는지가 보여야 하고,
+  침묵한 채 섞이면 안 된다. 비과세가 안 되면 단기보유 세율 구간으로 떨어진다.
+tags: [비과세, 보유2년, 경계, 모순, 명시vs도출]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 을, birth: 1980-05-05, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan1
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    prices: {2026: 600_000_000}
+ownerships:
+  - {person: p1, property: busan1, share: 1, acquired: 2024-03-15, cause: purchase}
+residences:
+  - {person: p1, property: busan1, start: 2024-03-15}
+transfer:
+  property: busan1
+  person: p1
+  date: 2026-03-14
+  price: 900_000_000
+  acquisition_price: 500_000_000
+  acquisition_date: 2024-03-15
+  necessary_expense: 10_000_000
+  share: 1
+  holding_years: 2
+
+---
+
+id: exempt-03
+label: 조정지역에서 2025-10-16 취득 · 거주 2년 채우고 양도
+origin: exempt-agent
+intent: |
+  조정대상지역 취득 시 붙는 거주 2년 추가요건이 처음으로 판정 가능한 구간이다.
+  조정지역 이력이 2025-10-16부터 수집돼 있으므로 취득일을 정확히 그 첫날에 둔다.
+  취득 즉시 입주해 계속 거주 → 보유 2년·거주 2년을 동시에 채운 채 2027-10-16 양도.
+  "취득 당시" 조정 여부를 양도 시점 기준으로 잘못 보면 여기서 갈린다.
+expectation: |
+  취득 당시 조정대상지역으로 판정되어 거주 2년 요건이 추가로 걸리고, 거주 이력이
+  그 요건을 충족해 비과세가 성립한다. 12억 이하이므로 전액 비과세.
+tags: [비과세, 조정지역, 거주요건, 취득시점]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 병, birth: 1985-09-09, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: gangnam
+    name: 역삼 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 900_000_000, 2027: 950_000_000}
+ownerships:
+  - {person: p1, property: gangnam, share: 1, acquired: 2025-10-16, cause: purchase}
+residences:
+  - {person: p1, property: gangnam, start: 2025-10-16}
+transfer:
+  property: gangnam
+  person: p1
+  date: 2027-10-16
+  price: 1_150_000_000
+  acquisition_price: 800_000_000
+  acquisition_date: 2025-10-16
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: exempt-04
+label: 조정지역에서 2025-10-16 취득 · 보유는 채웠으나 거주 이력 0
+origin: exempt-agent
+intent: |
+  exempt-03의 대조군. 사실 하나만 뺐다 — 거주 이력이 없다.
+  보유 요건만 보고 비과세를 내주면 여기서 새어 나온다. 조정지역 취득분에
+  거주 2년이 실제로 별도 게이트로 작동하는지 확인한다.
+expectation: |
+  보유 2년은 충족하지만 거주 이력이 없어 조정지역 취득 추가요건을 못 채우고
+  비과세가 부인된다. exempt-03과 세액이 달라야 하며, 같으면 거주 게이트가 죽은 것이다.
+tags: [비과세, 조정지역, 거주요건, 대조군]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 정, birth: 1985-09-09, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: jamsil
+    name: 잠실 아파트
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2026: 900_000_000, 2027: 950_000_000}
+ownerships:
+  - {person: p1, property: jamsil, share: 1, acquired: 2025-10-16, cause: purchase}
+# 거주 이력 없음 = 비거주
+transfer:
+  property: jamsil
+  person: p1
+  date: 2027-10-16
+  price: 1_150_000_000
+  acquisition_price: 800_000_000
+  acquisition_date: 2025-10-16
+  necessary_expense: 0
+  share: 1
+
+---
+
+id: exempt-05
+label: 고가주택 경계 — 양도가액 정확히 12억
+origin: exempt-agent
+intent: |
+  고가주택 문턱을 1원도 넘지 않는 지점. "12억 초과"가 아니라 "12억 이상"으로
+  구현돼 있으면 여기서 초과분이 생기며 세금이 나온다. 요건은 넉넉히 채워두고
+  (보유 6년·거주 6년) 오직 금액 경계만 남긴다.
+expectation: |
+  12억을 초과하지 않으므로 안분 대상 초과분이 0이고, 전액 비과세되어 세액 0.
+  여기서 세액이 1원이라도 나오면 부등호가 뒤집힌 것이다.
+tags: [비과세, 고가주택, 경계, 12억]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 무, birth: 1978-01-20, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: cheonan
+    kind: apartment
+    dong: "4413010100"
+    urban: true
+    prices: {2026: 800_000_000}
+ownerships:
+  - {person: p1, property: cheonan, share: 1, acquired: 2020-04-10, cause: purchase}
+residences:
+  - {person: p1, property: cheonan, start: 2020-04-10}
+transfer:
+  property: cheonan
+  person: p1
+  date: 2026-06-10
+  price: 1_200_000_000
+  acquisition_price: 500_000_000
+  acquisition_date: 2020-04-10
+  necessary_expense: 20_000_000
+  share: 1
+
+---
+
+id: exempt-06
+label: 고가주택 경계 — 양도가액 12억 + 1원
+origin: exempt-agent
+intent: |
+  exempt-05에서 1원만 올렸다. 이 1원이 고가주택 스위치를 켜고, 안분비율
+  (12억 초과분 1원 ÷ 양도가액)이 사실상 0에 수렴하는 극단을 만든다.
+  0으로 나누기·반올림·바닥처리가 어떻게 굴러가는지, 그리고 "고가주택이니까"라며
+  차익 전체를 과세하는 실수가 없는지 본다.
+expectation: |
+  비과세 자체는 유지되되 고가주택 초과분이 발생해 세액이 0보다 커진다.
+  다만 안분비율이 극히 작으므로 세액도 극히 작아야 한다. exempt-05와 세액이
+  자릿수 단위로 벌어지면 안분이 아니라 전체 과세로 처리된 것이다.
+tags: [비과세, 고가주택, 경계, 12억, 안분]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 기, birth: 1978-01-20, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: cheonan
+    kind: apartment
+    dong: "4413010100"
+    urban: true
+    prices: {2026: 800_000_000}
+ownerships:
+  - {person: p1, property: cheonan, share: 1, acquired: 2020-04-10, cause: purchase}
+residences:
+  - {person: p1, property: cheonan, start: 2020-04-10}
+transfer:
+  property: cheonan
+  person: p1
+  date: 2026-06-10
+  price: 1_200_000_001
+  acquisition_price: 500_000_000
+  acquisition_date: 2020-04-10
+  necessary_expense: 20_000_000
+  share: 1
+
+---
+
+id: exempt-07
+label: 상속주택 보유 중 일반주택 15억 양도 · 보유 13년 거주 13년
+origin: exempt-agent
+intent: |
+  세 가지를 한 번에 건다. ① 상속주택이 있어 물리적으로는 2주택인데 일반주택
+  양도 시 비과세 특례가 살아 있는가 ② 15억 고가주택 안분(초과분 3억/15억 = 20%)
+  ③ 보유·거주 모두 10년을 넘겨 장특공제 표2가 상한까지 차오르는가.
+  1회차에는 보유기간이 None이라 표2 자체에 도달한 적이 없다.
+expectation: |
+  상속주택이 주택수에서 제외되어 일반주택이 1세대1주택 비과세 대상이 되고,
+  12억 초과분에만 과세된다. 초과분 과세분에는 장특공제 표2(보유+거주)가
+  최대치 부근으로 적용되어, 같은 차익의 일반 양도보다 세액이 크게 낮아야 한다.
+tags: [비과세, 상속주택, 고가주택, 장특공제표2, 복합]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 경, birth: 1970-11-11, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan_main
+    name: 해운대 본가
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    prices: {2026: 1_100_000_000}
+  - id: mokpo_inherit
+    name: 상속받은 목포 주택
+    kind: detached
+    dong: "4611010100"
+    urban: false
+    prices: {2026: 180_000_000}
+ownerships:
+  - {person: p1, property: busan_main, share: 1, acquired: 2013-06-01, cause: purchase}
+  - person: p1
+    property: mokpo_inherit
+    share: 1
+    acquired: 2024-02-10
+    cause: inheritance
+    inherited:
+      date: 2024-02-10
+      share: 1
+      value: 180_000_000
+residences:
+  - {person: p1, property: busan_main, start: 2013-06-01}
+transfer:
+  property: busan_main
+  person: p1
+  date: 2026-09-10
+  price: 1_500_000_000
+  acquisition_price: 400_000_000
+  acquisition_date: 2013-06-01
+  necessary_expense: 30_000_000
+  share: 1
+
+---
+
+id: exempt-08
+label: 30억 양도 · 차익 20억 · 보유 3년인데 residence_years만 2로 명시
+origin: exempt-agent
+intent: |
+  안분비율이 커지는 쪽 극단(초과분 18억/30억 = 60%)을 본다. 차익이 20억이라
+  안분비율 오차가 세액에 그대로 증폭돼 나타난다.
+  동시에 거주 신호를 모순되게 준다 — 실제 거주 이력은 1년인데 residence_years: 2를
+  명시했다. 비조정지역이라 비과세 요건에는 거주가 걸리지 않으므로, 이 모순은
+  오직 장특공제 표2의 거주 구간에만 영향을 준다. 어느 값이 채택됐는지가 드러난다.
+expectation: |
+  비과세는 성립하지만 양도가액의 60%가 과세 대상 초과분으로 안분되어 세액이 크다.
+  보유 3년 구간의 장특공제는 표2 하단이므로 공제율이 낮게 나와야 한다.
+  거주 1년(이력)과 2년(명시) 중 어느 쪽이 공제율에 반영됐는지 추적 가능해야 한다.
+tags: [비과세, 고가주택, 안분, 장특공제표2, 모순, 명시vs도출]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 신, birth: 1975-02-28, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seogwipo
+    kind: apartment
+    dong: "5013010100"
+    urban: true
+    prices: {2026: 2_100_000_000}
+ownerships:
+  - {person: p1, property: seogwipo, share: 1, acquired: 2023-04-20, cause: purchase}
+residences:
+  - {person: p1, property: seogwipo, start: 2023-04-20, end: 2024-04-19}
+transfer:
+  property: seogwipo
+  person: p1
+  date: 2026-05-20
+  price: 3_000_000_000
+  acquisition_price: 1_000_000_000
+  acquisition_date: 2023-04-20
+  necessary_expense: 0
+  share: 1
+  residence_years: 2
+
+---
+
+id: exempt-09
+label: 일시적 2주택 — 신규주택 취득 7개월 뒤 종전주택 양도
+origin: exempt-agent
+intent: |
+  종전주택을 파는 순간 세대 주택수는 2다. 그런데도 일시적 2주택 특례로
+  1세대1주택 비과세가 열려야 한다. 종전주택은 보유 6년·거주 6년으로 요건을
+  충분히 채웠고, 신규주택 취득일(2026-01-10)과 종전주택 양도일(2026-08-20)의
+  간격이 처분기한 안이다. 주택수만 세고 특례를 안 보면 여기서 비과세가 죽는다.
+expectation: |
+  종전주택 양도가 일시적 2주택 특례로 비과세되고, 12억 이하이므로 전액 비과세.
+  단순 주택수 판정으로 2주택 과세(중과 포함)가 나오면 특례가 미구현이다.
+tags: [비과세, 일시적2주택, 특례, 주택수]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 임, birth: 1982-07-07, household: h1, spouse: p2}
+  - {id: p2, name: 임배우자, birth: 1983-12-01, household: h1, spouse: p1}
+households:
+  - {id: h1, members: [p1, p2]}
+properties:
+  - id: old_busan
+    name: 종전 해운대 아파트
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    prices: {2026: 700_000_000}
+  - id: new_cheonan
+    name: 신규 천안 아파트
+    kind: apartment
+    dong: "4413010100"
+    urban: true
+    prices: {2026: 500_000_000}
+ownerships:
+  - {person: p1, property: old_busan, share: 1, acquired: 2020-02-05, cause: purchase}
+  - {person: p1, property: new_cheonan, share: 1, acquired: 2026-01-10, cause: purchase}
+residences:
+  - {person: p1, property: old_busan, start: 2020-02-05, end: 2026-01-09}
+  - {person: p1, property: new_cheonan, start: 2026-01-10}
+transfer:
+  property: old_busan
+  person: p1
+  date: 2026-08-20
+  price: 1_050_000_000
+  acquisition_price: 600_000_000
+  acquisition_date: 2020-02-05
+  necessary_expense: 15_000_000
+  share: 1
+
+---
+
+id: exempt-10
+label: 세대원(동거 성년 자녀)이 별도 1채 보유 — 본인은 1채지만 세대는 2채
+origin: exempt-agent
+intent: |
+  인별로는 완벽한 1주택이고 보유 8년·거주 8년으로 요건도 다 찼다.
+  깨는 사실은 하나뿐 — 같은 세대의 자녀가 다른 집을 갖고 있다.
+  "1세대"가 사람 단위로 잘못 판정되면 여기서 비과세가 잘못 열린다.
+  exempt-01/05와 요건 충족 정도는 같으므로 차이는 오직 세대 구성에서 나온다.
+expectation: |
+  세대 기준 2주택이므로 1세대1주택 비과세가 성립하지 않고 양도차익 전액이
+  과세된다. 비과세가 나오면 세대 판정이 인별로 무너진 것이다.
+  비조정지역이므로 다주택 중과는 붙지 않아야 한다.
+tags: [비과세, 세대판정, 주택수, 부인]
+year: 2026
+subject: p1
+persons:
+  - {id: p1, name: 조, birth: 1968-03-30, household: h1}
+  - {id: p3, name: 조자녀, birth: 1996-08-15, household: h1}
+households:
+  - {id: h1, members: [p1, p3], independent_members: []}
+properties:
+  - id: busan_parent
+    kind: apartment
+    dong: "2647010100"
+    urban: true
+    prices: {2026: 750_000_000}
+  - id: daegu_child
+    kind: apartment
+    dong: "2711010100"
+    urban: true
+    prices: {2026: 320_000_000}
+ownerships:
+  - {person: p1, property: busan_parent, share: 1, acquired: 2018-05-25, cause: purchase}
+  - {person: p3, property: daegu_child, share: 1, acquired: 2023-09-01, cause: purchase}
+residences:
+  - {person: p1, property: busan_parent, start: 2018-05-25}
+  - {person: p3, property: busan_parent, start: 2018-05-25}
+transfer:
+  property: busan_parent
+  person: p1
+  date: 2026-07-01
+  price: 1_100_000_000
+  acquisition_price: 550_000_000
+  acquisition_date: 2018-05-25
+  necessary_expense: 10_000_000
+  share: 1

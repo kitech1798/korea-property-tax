@@ -37,13 +37,23 @@ if ($dirty) {
 Push-Location (Join-Path $Repo $Prefix)
 $test = python -m pytest tests/ -q --tb=no 2>&1 | Select-String "passed"
 $lint = python -m realestate_tax.rules.lint 2>&1 | Select-String "이상 없음"
+# 상황 시뮬레이션도 게이트에 건다. 하네스는 **자동으로 돌지 않으면 아무 의미가 없다** —
+# 손으로 돌리는 검증은 바쁠 때 가장 먼저 생략되고, 바쁠 때가 사고가 나는 때다.
+$sim = python -m sim.run --fail-on-violation 2>&1 | Select-String "^시나리오"
+$simOk = $LASTEXITCODE -eq 0
 Pop-Location
 if (-not $test -or -not $lint) {
     Write-Host "테스트 또는 룰셋 린트가 통과하지 않았습니다. 배포를 중단합니다." -ForegroundColor Red
     exit 1
 }
+if (-not $simOk) {
+    Write-Host "상황 시뮬레이션에서 불변식 위반이 있습니다. 배포를 중단합니다." -ForegroundColor Red
+    Write-Host "  자세히 보기: python -m sim.run" -ForegroundColor Yellow
+    exit 1
+}
 Write-Host "  테스트: $($test.Line.Trim())"
 Write-Host "  룰셋:   통과"
+Write-Host "  시뮬:   $($sim.Line.Trim())"
 
 # ── 2. 비밀·개인정보 스캔 ──────────────────────────────────────────
 # 인증키는 환경변수로만 쓰지만, 실수로 붙여넣은 흔적을 매번 확인한다.

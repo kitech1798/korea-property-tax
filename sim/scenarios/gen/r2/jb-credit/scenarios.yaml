@@ -1,0 +1,366 @@
+# 앵글: 종부세 세액공제 — 연령 × 보유/거주 조합
+#
+# 1회차에서 보유기간이 항상 None이라 아래 분기가 전부 단락됐다. 이제 취득일에서
+# 도출되므로, 연령 경계(60/65/70)를 과세기준일 6/1 기준 하루 차이로 때리고,
+# 보유 5/10/15년·거주 2/5/10/15년 구간을 교차시키고, 합산 80% 한도와
+# 2026 현행 → 2027 과도기 → 2028 이후 전환이 실제로 4년 갈리는지 본다.
+#
+# 기간은 전부 사실(취득일·거주 이력)에서 도출시킨다. holding_years/residence_years는
+# 쓰지 않는다 — 단, jb-credit-07 하나만 일부러 명시해 "명시가 도출을 이기는가"를 본다.
+
+id: jb-credit-01
+label: 만 60세가 되는 날이 정확히 과세기준일 6/1 — 15년 보유·15년 거주 1주택
+origin: jb-credit
+intent: |
+  연령 세액공제 하한(60세)을 과세기준일에 정확히 걸친다. 1966-06-01생은
+  2026-06-01에 만 60세가 되는 그 날이다. 연령을 "년도 빼기"로 계산하는지
+  "과세기준일 시점 만 나이"로 계산하는지가 여기서 갈린다.
+  보유·거주는 15년으로 채워 연령 칸만 변수로 남긴다.
+expectation: |
+  2026년에 연령공제가 붙어야 한다(만 60세 도달일 = 과세기준일).
+  2027~2029로 갈수록 연령 구간이 올라가므로 공제율이 단조 증가하거나 최소한
+  줄어들지 않아야 한다. 4개 연도가 전부 동일한 값이면 전환 로직이 죽은 것이다.
+tags: [종부세, 세액공제, 연령경계, 60세, 1주택]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+subject: p1
+persons:
+  - {id: p1, name: 갑60_당일, birth: 1966-06-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 서울 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 3_000_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2011-06-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2011-06-01}
+
+---
+
+id: jb-credit-02
+label: 생일이 하루 늦다 — 1966-06-02생, 과세기준일엔 아직 59세
+origin: jb-credit
+intent: |
+  jb-credit-01과 물건·보유·거주가 완전히 동일하고 생년월일만 하루 늦다.
+  2026년 과세기준일(6/1)에는 만 59세이므로 연령공제가 0이어야 하고,
+  2027년부터 붙어야 한다. 01과 2026 세액이 같으면 연령 경계가 안 잡힌 것이다.
+expectation: |
+  2026년 연령 세액공제가 없어 jb-credit-01의 2026년보다 세액이 높아야 한다.
+  2027년부터는 01과 같은 연령 구간으로 합류한다.
+tags: [종부세, 세액공제, 연령경계, 하루차이, 1주택]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+subject: p1
+persons:
+  - {id: p1, name: 갑60_하루늦음, birth: 1966-06-02, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 서울 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 3_000_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2011-06-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2011-06-01}
+
+---
+
+id: jb-credit-03
+label: 70세 + 보유 15년 + 거주 15년 — 합산 80% 한도에 정면으로 걸리는 조합
+origin: jb-credit
+intent: |
+  연령 최고구간(70세)과 보유 최고구간(15년)이 동시에 성립한다.
+  단순 합산이면 한도를 넘는 조합이므로, 한도가 실제로 잘리는지 본다.
+  한도 처리가 없으면 세액이 비정상적으로 낮게(또는 음수 방향으로) 나온다.
+  거주도 15년이라 2028년 이후 거주 기준 전환에서도 최고구간을 유지한다.
+expectation: |
+  합산 공제율이 상한에서 잘려야 한다. 2026·2027·2028·2029 모두 상한에 걸리므로
+  같은 공시가격이면 연도 간 공제율은 동일한 상한값이어야 하고,
+  세액 차이는 공제율이 아니라 공정시장가액비율·기본공제·세율 변화에서만 와야 한다.
+  공제 후 산출세액이 0 미만이거나 공제액이 산출세액을 초과하면 불변식 위반이다.
+tags: [종부세, 세액공제, 합산한도, 70세, 15년, 1주택]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+subject: p1
+prior_year_total_tax: 12_000_000
+persons:
+  - {id: p1, name: 을70, birth: 1956-06-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 서울 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 4_000_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2011-06-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2011-06-01}
+
+---
+
+id: jb-credit-04
+label: 65세 되는 날 = 6/1 · 보유 딱 10년 · 거주 딱 5년 — 세 경계 동시 착지
+origin: jb-credit
+intent: |
+  연령 65세 도달일, 보유 10년 도달일, 거주 5년 도달일을 전부 과세기준일에 맞췄다.
+  세 축이 동시에 구간 경계에 서므로, ">= " 인지 "> " 인지의 부호 실수가 한꺼번에 드러난다.
+  2027년에는 셋 다 한 칸씩 위로 가지 않는(연령만 유지되는) 구간이라 전환 검증에도 쓴다.
+expectation: |
+  2026년에 세 경계가 모두 "충족" 쪽으로 잡혀야 한다(도달일 당일 포함).
+  하나라도 미달로 잡히면 다음 해에 급격히 점프하는 계단이 보일 것이다.
+tags: [종부세, 세액공제, 65세, 보유10년, 거주5년, 경계]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+subject: p1
+persons:
+  - {id: p1, name: 병65, birth: 1961-06-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 서울 아파트
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2026: 3_200_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2016-06-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2021-06-01}
+
+---
+
+id: jb-credit-05
+label: 보유 5년에서 하루 모자람 — 연령공제가 아예 없는 50세, 순수 보유 경계
+origin: jb-credit
+intent: |
+  연령 변수를 죽여(1976년생, 4개 연도 내내 60세 미만) 보유기간 하한만 남긴다.
+  2021-06-02 취득이므로 2026-06-01 과세기준일엔 4년 364일이다.
+  보유공제가 붙으면 하루를 반올림한 것이고, 2027년부터 붙어야 옳다.
+expectation: |
+  2026년 세액공제가 0이어야 한다. 2027년에 보유 구간이 열리며 세액이 떨어진다.
+  2026과 2027이 같으면 보유기간이 여전히 도출되지 않고 있거나 하루가 무시된 것이다.
+tags: [종부세, 세액공제, 보유5년, 하루차이, 연령무관]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+subject: p1
+persons:
+  - {id: p1, name: 정50, birth: 1976-01-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 서울 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 2_800_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2021-06-02, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2021-06-02}
+
+---
+
+id: jb-credit-06
+label: 증여받아 계속 살던 집 — 거주 16년인데 보유는 3년 (70세)
+origin: jb-credit
+intent: |
+  부모 집에 2010년부터 계속 살다가 2023년에 증여로 소유권만 넘겨받았다.
+  거주기간(16년)이 보유기간(3년)을 크게 앞선다.
+  2026 현행(보유 기준)에서는 보유공제 0, 2028 이후(거주 기준)에서는 최고구간이므로
+  같은 사람·같은 집에서 연도별로 공제가 크게 뒤집혀야 한다. 여기가 갈리지 않으면
+  개편안 전환 자체가 구현되지 않은 것이다.
+  또한 거주 시작일이 취득일보다 앞서는 사실 관계를 엔진이 받아들이는지도 본다.
+expectation: |
+  2026년 공제는 연령분만, 2028·2029년에는 거주분이 더해져 상한 근처까지 올라간다.
+  즉 2026 → 2029로 갈수록 공제율이 올라가고 세액 방향이 반대로 움직여야 한다.
+  2027 과도기 값은 2026과 2028 사이 어딘가여야지, 2028과 똑같으면 안 된다.
+tags: [종부세, 세액공제, 증여, 거주장기, 보유단기, 개편안전환]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+subject: p1
+persons:
+  - {id: p1, name: 무70, birth: 1956-06-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 서울 단독주택
+    kind: detached
+    dong: "1117010100"
+    urban: true
+    prices: {2026: 3_500_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2023-03-01, cause: gift}
+residences:
+  - {person: p1, property: house1, start: 2010-03-01}
+
+---
+
+id: jb-credit-07
+label: 그 반대 — 보유 20년, 거주는 2년에서 하루 모자람 (70세) · 기간 명시 동시 투입
+origin: jb-credit
+intent: |
+  jb-credit-06의 거울상. 오래 갖고만 있다가 최근에 들어가 산다.
+  2024-06-02 입주라 2026-06-01엔 1년 364일이다.
+  현행(보유)에서는 최고구간, 개편안(거주)에서는 최저구간으로 뒤집혀야 한다.
+  덧붙여 이 건에만 transfer 블록에 holding_years/residence_years를 명시해,
+  명시값이 취득일 도출값을 이기는지(양도세 쪽) 확인한다. 종부세 쪽은
+  명시 필드가 없으므로 도출값만으로 계산돼야 한다.
+expectation: |
+  2026년 공제율은 높고, 2028·2029년에는 거주 기준으로 내려가 세액이 올라간다.
+  즉 06과 정확히 반대 방향의 기울기가 나와야 한다.
+  양도세에서는 명시한 holding_years/residence_years가 취득일 도출값(20년/2년 미만)과
+  충돌하는데, 어느 쪽을 썼는지가 결과에 드러나야 한다(조용히 둘 다 무시되면 안 된다).
+tags: [종부세, 세액공제, 보유장기, 거주단기, 개편안전환, 명시vs도출]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+subject: p1
+persons:
+  - {id: p1, name: 기70, birth: 1956-06-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 서울 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    prices: {2026: 3_500_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2006-06-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2024-06-02}
+transfer:
+  property: house1
+  person: p1
+  date: 2027-06-15
+  price: 4_500_000_000
+  acquisition_price: 800_000_000
+  acquisition_date: 2006-06-01
+  necessary_expense: 20_000_000
+  share: 1
+  holding_years: 3
+  residence_years: 1
+
+---
+
+id: jb-credit-08
+label: 2027 과도기 — 거주 14년이 보유의 절반(10년)을 이기는 조합 (65세)
+origin: jb-credit
+intent: |
+  2027년 과도기 규정이 "보유기간의 1/2 vs 거주기간 중 높은 쪽"이라면,
+  보유 20년(→10년)과 거주 14년이 붙었을 때 거주 14년이 채택돼야 한다.
+  거주가 이기는 쪽 표본. jb-credit-09가 그 반대 표본이며 둘을 짝으로 읽는다.
+  2026(보유 20년)·2027(거주 14년 채택)·2028~(거주 14년)이 서로 다른 구간에
+  떨어지도록 숫자를 골랐다.
+expectation: |
+  2026년은 보유 최고구간, 2027년은 거주 14년이 채택된 구간, 2028년 이후는 거주 구간.
+  2027과 2028이 완전히 같은 세액이면 과도기식이 그냥 2028식으로 대체된 것이다.
+  2026 · 2027 · 2028 세 값이 모두 같으면 전환 자체가 없는 것이다.
+tags: [종부세, 세액공제, 2027과도기, 거주우세, 65세]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+subject: p1
+prior_year_total_tax: 9_000_000
+persons:
+  - {id: p1, name: 경65, birth: 1961-06-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 분당 아파트
+    kind: apartment
+    dong: "4113510100"
+    urban: true
+    prices: {2026: 3_000_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2006-06-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2012-06-01}
+
+---
+
+id: jb-credit-09
+label: 2027 과도기 반대편 — 보유 30년의 절반(15년)이 거주 6년을 이긴다 · 거주 이력 두 토막
+origin: jb-credit
+intent: |
+  08의 거울상. 보유 30년(→15년)과 거주 6년이 붙으면 보유의 절반이 채택돼야 한다.
+  동시에 거주 이력을 두 구간으로 끊어(2010~2013 3년, 2023~현재 3년) 합산 6년이
+  되도록 했다. 엔진이 마지막 구간만 보고 3년으로 세는지, 합산해 6년으로 세는지가
+  2028년 이후 거주 기준 구간을 좌우한다.
+expectation: |
+  2027년은 보유의 절반(15년) 쪽이 채택돼 08보다 유리한 구간에 있어야 한다.
+  2028년 이후 거주 기준으로 넘어가면 6년(또는 잘못 세면 3년)으로 뚝 떨어져
+  세액이 올라간다. 2027 → 2028 사이에 하락이 아니라 상승 계단이 보여야 한다.
+  거주 두 토막이 합산되는지 여부는 2028년 공제 구간으로 판별한다.
+tags: [종부세, 세액공제, 2027과도기, 보유우세, 거주단절, 70세]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+subject: p1
+persons:
+  - {id: p1, name: 신70, birth: 1956-06-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 서울 아파트
+    kind: apartment
+    dong: "1150010100"
+    urban: true
+    prices: {2026: 3_000_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 1996-06-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2010-06-01, end: 2013-05-31}
+  - {person: p1, property: house1, start: 2023-06-01}
+
+---
+
+id: jb-credit-10
+label: 공시 100억 · 70세 · 15년 보유 · 15년 거주 — 개편안 공제 한도 금액이 있으면 여기서 걸린다
+origin: jb-credit
+intent: |
+  세액공제가 비율이 아니라 금액 상한을 갖는다면, 산출세액이 클수록 상한이 먼저 문다.
+  jb-credit-03과 인적 조건은 같고 공시가격만 100억으로 올렸다.
+  03과 10의 공제액을 비율로 환산했을 때 같은 비율이면 금액 상한이 없는 것이고,
+  10에서 비율이 낮아지면 금액 상한이 작동한 것이다. 어느 쪽인지 관측이 목적이다.
+  아울러 극단 금액에서 상한·누진 경계가 깨지지 않는지도 함께 본다.
+expectation: |
+  공제액이 산출세액을 넘지 않아야 하고 최종 세액이 음수가 될 수 없다.
+  03 대비 공제율이 같거나 낮아야 한다(금액 상한이 있으면 낮다).
+  세부담상한 판정이 전년 세액과 함께 정상적으로 계산돼 나와야 한다.
+tags: [종부세, 세액공제, 금액상한, 극단금액, 70세, 1주택]
+year: 2026
+years: [2026, 2027, 2028, 2029]
+subject: p1
+prior_year_total_tax: 40_000_000
+persons:
+  - {id: p1, name: 임70, birth: 1956-06-01, household: h1}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: house1
+    name: 한남동 대형 주택
+    kind: detached
+    dong: "1117010100"
+    urban: true
+    area_m2: 330.0
+    prices: {2026: 10_000_000_000}
+ownerships:
+  - {person: p1, property: house1, share: 1, acquired: 2011-06-01, cause: purchase}
+residences:
+  - {person: p1, property: house1, start: 2011-06-01}

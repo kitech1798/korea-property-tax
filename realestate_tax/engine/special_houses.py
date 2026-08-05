@@ -378,6 +378,18 @@ def _check_inheritance(
     )
 
 
+_METROPOLITAN_PREFIXES = frozenset({"26", "27", "28", "29", "30", "31"})
+"""광역시 법정동코드 앞 2자리 — 부산26·대구27·인천28·광주29·대전30·울산31.
+
+서울(11)·세종(36)은 각각 특별시·특별자치시라 별도 문언이 적용되고, 수도권 필터가
+먼저 걸러낸다. 여기서는 '수도권 밖 광역시'만 가려내면 된다.
+"""
+
+
+def _is_metropolitan_city(legal_dong_code: str) -> bool:
+    return legal_dong_code[:2] in _METROPOLITAN_PREFIXES
+
+
 def _check_rural(
     case: TaxCase, prop: Property, ruleset: RuleSet, on: date, track: Track
 ) -> SpecialHouse | MissedSpecial | None:
@@ -400,6 +412,27 @@ def _check_rural(
     limit = int(payload["max_value"])
     if fact.value > limit:
         return None
+
+    # ★ 지역 요건은 "수도권 밖"만이 아니다(SIM-09, 2026-08-05 시뮬레이션).
+    #   종부령 §4의2③ — 수도권 밖의 지역 **중** 「광역시 및 특별자치시가 아닌 지역」,
+    #   「광역시에 소속된 군」, 「세종시 읍·면」이어야 한다.
+    #   즉 광역시 **본청 지역**(대구 중구 등)은 수도권 밖이어도 대상이 아니다.
+    #
+    #   예전에는 수도권만 걸러 놓고 "수도권 밖에 소재"라고 **단정**했다. 그래서 대구
+    #   아파트가 주택 수에서 빠져 2주택자가 1세대1주택자가 됐다. 코드 주석은 스스로
+    #   "지역 요건은 판정하기 어렵다"고 적어 놓고도 결론은 단정하고 있었다.
+    #
+    #   광역시 소속 군은 대상이 맞지만 법정동코드만으로 군을 확정할 수 없다.
+    #   그래서 **적용하지 않고 확인을 요구한다** — 유리한 쪽으로 가정하지 않는다는 원칙.
+    if _is_metropolitan_city(prop.legal_dong_code):
+        return MissedSpecial(
+            prop.id,
+            SpecialKind.RURAL_LOW_PRICE,
+            f"공시가격 {fact.value:,}원으로 가액 요건({limit:,}원 이하)은 충족하나, "
+            "광역시 지역입니다. 지방 저가주택은 광역시 중 **군 지역**만 해당하므로"
+            "(종부령 §4의2③) 해당 여부를 확인해주세요.",
+            actionable=True,
+        )
 
     auto_from = payload.get("auto_applied_from")
     needs_application = not (auto_from and on >= date.fromisoformat(str(auto_from)))

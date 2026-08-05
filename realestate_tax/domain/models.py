@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -245,11 +246,17 @@ class Person:
     """거주자 여부(소득세법상). 비거주자는 일부 특례에서 배제된다."""
 
     def age_at(self, on: date) -> int | None:
-        """만 나이. 생년월일이 없으면 None을 돌려 판정 불가로 흘려보낸다."""
+        """만 나이. 생년월일이 없으면 None을 돌려 판정 불가로 흘려보낸다.
+
+        2월 29일생은 평년에 해당일이 없다. 민법 §160③에 따라 **그 월의 말일**(2/28)에
+        나이를 먹는다. 이 처리를 빼면 윤년생만 하루씩 밀려 60/65/70세 세액공제
+        구간이 어긋난다 — 보유기간에서 같은 버그를 실측했다(SIM-08).
+        """
         if self.birth_date is None:
             return None
         years = on.year - self.birth_date.year
-        if (on.month, on.day) < (self.birth_date.month, self.birth_date.day):
+        birthday = min(self.birth_date.day, monthrange(on.year, self.birth_date.month)[1])
+        if (on.month, on.day) < (self.birth_date.month, birthday):
             years -= 1
         return years
 

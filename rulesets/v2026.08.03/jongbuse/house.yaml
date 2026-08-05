@@ -393,7 +393,7 @@ blocks:
 rule_id: jongbuse.house.credit_holding
 unit: rate
 description: |
-  1세대1주택자 보유기간별 세액공제(종부세법 §9⑦).
+  1세대1주택자 보유기간별 세액공제(종부세법 §9⑧).
 
   개편안은 이걸 거주기간 공제로 전환한다. 2027년은 과도기로 '보유공제의 1/2'과
   '거주공제' 중 높은 쪽을 쓰고, 2028년부터는 거주공제만 남는다.
@@ -401,7 +401,7 @@ blocks:
   - id: holding-current
     tracks: [current]
     effective_from: 2021-01-01
-    basis: {law: 종합부동산세법, article: "9", clause: "7", mst: "280417"}
+    basis: {law: 종합부동산세법, article: "9", clause: "8", mst: "280417"}
     source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000900", fetched_at: 2026-08-04}
     certainty: enacted
     payload:
@@ -414,7 +414,7 @@ blocks:
     tracks: [reform]
     effective_from: 2027-01-01
     effective_to: 2027-12-31
-    basis: {law: 종합부동산세법, article: "9", clause: "7"}
+    basis: {law: 종합부동산세법, article: "9", clause: "8"}
     source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 19}
     certainty: bill_pending
     payload:
@@ -431,7 +431,7 @@ blocks:
   - id: holding-reform-2028
     tracks: [reform]
     effective_from: 2028-01-01
-    basis: {law: 종합부동산세법, article: "9", clause: "7"}
+    basis: {law: 종합부동산세법, article: "9", clause: "8"}
     source: {kind: pdf, file: "1. 2026년 세제개편안 개조식.pdf", page: 19}
     certainty: bill_pending
     payload:
@@ -444,12 +444,12 @@ blocks:
 ---
 rule_id: jongbuse.house.credit_rate_cap
 unit: rate
-description: 연령공제 + 보유(거주)공제 합계 공제율 한도(종부세법 §9⑧). 현행·개편안 모두 80%.
+description: 연령공제 + 보유(거주)공제 합계 공제율 한도(종부세법 §9⑤ 후단). 현행·개편안 모두 80%.
 blocks:
   - id: cap-80
     tracks: [current, reform]
     effective_from: 2009-01-01
-    basis: {law: 종합부동산세법, article: "9", clause: "8", mst: "280417"}
+    basis: {law: 종합부동산세법, article: "9", clause: "5", mst: "280417"}
     source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280417&JO=000900", fetched_at: 2026-08-04}
     certainty: enacted
     value: "0.80"

@@ -12,12 +12,13 @@
 
 근거
   보유기간 — 소득세법 §95④ "자산의 취득일부터 양도일까지",
-              종합부동산세법 §9의4② (과세기준일 현재)
+              종합부동산세법 §9⑧ (과세기준일 현재 보유기간)
   거주기간 — 소득세법 시행령 §154⑥ (주민등록표상 전입일~전출일)
 """
 
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import date
 from typing import Iterable, Sequence
 
@@ -29,9 +30,18 @@ def full_years(start: date, until: date) -> int:
 
     하루 차이로 공제 구간이 갈리므로(보유 3년, 거주 2년, 15년 구간 등)
     나이 계산과 다른 규약을 쓰면 경계에서 조용히 어긋난다.
+
+    ★ 2월 29일 취득분(SIM-08, 2026-08-05 시뮬레이션).
+      민법 §160③ — "최종의 월에 해당일이 없는 때에는 **그 월의 말일**로 기간이
+      만료한다." 국세기본법 §4가 기간 계산에 민법을 준용하므로 세법에도 그대로 온다.
+
+      즉 2024-02-29 취득분의 보유 2년은 평년인 2026년에는 **2월 28일**에 만료한다.
+      단순히 (월, 일)을 비교하면 (2,28) < (2,29)라 하루가 밀려 보유 1년이 되고,
+      2년 미만 단기세율 60%가 붙는다. 실측 차이 840,000원 vs 8,400,000원 — 10배다.
     """
     years = until.year - start.year
-    if (until.month, until.day) < (start.month, start.day):
+    anniversary_day = min(start.day, monthrange(until.year, start.month)[1])
+    if (until.month, until.day) < (start.month, anniversary_day):
         years -= 1
     return max(0, years)
 
