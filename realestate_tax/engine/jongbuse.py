@@ -528,6 +528,14 @@ def _taxable_threshold(
     **현행법은 기본공제가 곧 문턱이라 별도 문턱이 없다.** 규칙 부재를
     '문턱 0원'으로 오해하면 전원이 과세대상에서 빠진다.
     """
+    # ⚠️ 공시가격을 모르면 문턱 판정을 **하지 않는다.**
+    #   모르는 값을 문턱과 비교하면 0 ≤ 14억이 되어 "과세대상 아님 → 0원"으로
+    #   확정되고, 그 순간 '미상' 배지가 사라진다.
+    #   **모르는 것을 0으로 읽고 단언하는 것**이 이 프로젝트가 없애려는 실패다.
+    #   판정을 건너뛰면 아래 정상 경로가 미상을 그대로 물고 간다.
+    if assessed.unknown is not None:
+        return None
+
     try:
         res = ruleset.resolve(
             f"{J}.taxable_threshold", on=on, track=track, taxpayer=taxpayer,

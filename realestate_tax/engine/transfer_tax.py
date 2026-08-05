@@ -759,6 +759,12 @@ def _apply_rates(
     #   §104⑦에 후단이 따로 붙어 있는 이유가 그것이다.
     #
     # 이 비교가 없어서 보유 6개월 사례가 45%로 계산되고 있었다(2026-08-04 감사).
+    #
+    # ⚠️ 보유기간을 **모를 때**도 이 분기를 탄다. `held`가 0으로 떨어져 '1년 미만'이
+    #   되므로 세액은 보수적(높은) 쪽으로 가지만, 그건 판정이 아니라 **가정**이다.
+    #   가정을 판정인 척하면 사용자는 70%가 확정인 줄 안다 — 아래에서 확실성을 낮추고
+    #   무엇을 알려주면 달라지는지 남긴다.
+    unknown_holding = event.holding_years is None
     band = "under_1y" if held < 1 else ("1y_to_2y" if held < 2 else None)
     if band is not None and base_amount > 0:
         short = ruleset.resolve(f"{T}.short_term_rate", on=on, track=track, holding=band)
@@ -766,6 +772,20 @@ def _apply_rates(
         short_amount = int(base_amount * short_rate)
         rules.append(short.ref())
         label = "1년 미만" if band == "under_1y" else "1년 이상 2년 미만"
+        if unknown_holding:
+            alternatives.append(
+                Alternative(
+                    key="short_term_rate_assumed",
+                    label_ko="보유기간에 따른 세율 확정",
+                    reason_ko=(
+                        "보유기간을 알려주지 않아 **1년 미만으로 가정**했습니다"
+                        f"(단일세율 {float(short_rate) * 100:g}%). "
+                        "취득일을 알려주시면 실제 세율로 다시 계산합니다 — "
+                        "2년 이상이면 이 세율은 적용되지 않습니다."
+                    ),
+                    actionable=True,
+                )
+            )
         if short_amount > amount:
             substitution = (
                 f"max(기본{'+중과' if heavy_applies else ''} {amount:,}, "
@@ -786,6 +806,7 @@ def _apply_rates(
             )
 
     certainty = Certainty()
+
     if zone_unknown:
         # 조정대상지역을 모르면 중과 여부를 확정할 수 없다.
         # 유리한 쪽(비중과)으로 계산하되 확실성을 낮추고 사실을 드러낸다.
@@ -802,6 +823,9 @@ def _apply_rates(
             )
         )
 
+    if unknown_holding and band is not None:
+        # 보유기간을 몰라 '1년 미만'으로 가정했다. 가정을 판정인 척하지 않는다.
+        certainty = certainty & Certainty(determination=DeterminationQuality.UNDECIDABLE)
 
     value = derive_value(amount, taxable_base, certainty, *rules, label="산출세액")
     return value, node(

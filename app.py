@@ -178,6 +178,21 @@ if "houses" not in st.session_state:
         }
     ]
 
+
+# 주택 하나가 화면에 남기는 상태 키의 접두어. 인덱스가 뒤에 붙는다.
+# 위젯 키는 Streamlit이 정리하지만 `src`는 우리가 직접 넣은 값이라 우리가 지운다.
+_HOUSE_STATE_PREFIXES = (
+    "src", "adr_q", "adr_sel", "adr_dong", "adr_ho", "adr_go",
+)
+
+
+def _forget_houses_from(start: int, upto: int = 24) -> None:
+    """`start` 이상 인덱스의 주택 흔적을 지운다. 삭제 후 재추가에서 되살아나지 않게."""
+    for i in range(start, upto):
+        for prefix in _HOUSE_STATE_PREFIXES:
+            st.session_state.pop(f"{prefix}{i}", None)
+
+
 tab_input, tab_holding, tab_sell, tab_advice = st.tabs(
     ["① 상황 입력", "② 보유세 · 4년 타임라인", "③ 팔까 버틸까", "④ 상담"]
 )
@@ -214,6 +229,14 @@ with tab_input:
         if c2.button("－ 마지막 주택 삭제", use_container_width=True, disabled=len(st.session_state.houses) <= 1):
             st.session_state.houses.pop()
             st.rerun()
+
+    # ★ 삭제된 주택의 흔적을 지운다.
+    #   Streamlit은 **위젯 키**(pr1·dg1…)는 화면에서 사라지면 정리해 주지만,
+    #   우리가 직접 넣은 `src{i}`(자동조회 출처)는 정리하지 않는다.
+    #   그대로 두면 삭제 후 같은 인덱스로 주택을 다시 추가했을 때
+    #   **손으로 넣은 숫자에 "압구정 미성 25동 202호 조회값"이라는 거짓 딱지**가 붙는다.
+    #   값이 틀리는 것보다 출처가 거짓인 게 더 나쁘다 — 사용자가 그 숫자를 믿게 된다.
+    _forget_houses_from(len(st.session_state.houses))
 
     st.divider()
 
@@ -382,10 +405,13 @@ def build_case(target_year: int) -> TaxCase:
             owns.append(Ownership(ME, pid, Fraction(1), h["acquired"], cause, inherited))
 
         if h["resides"]:
+            # ⚠️ 예전에는 `max(1, 거주기간)`이었다. 거주 0년(올해 이사)을 넣으면
+            #    1년 전부터 산 것으로 **17개월을 날조**했다. 사실을 받는 도구가
+            #    사실을 지어내면 안 된다. 0년이면 그해 1월 1일부터로 둔다 —
+            #    과세기준일(6/1)은 포함하되 없는 과거는 만들지 않는다.
+            years = max(0, h["residence_years"])
             spells.append(
-                ResidenceSpell(
-                    ME, pid, start=date(target_year - max(1, h["residence_years"]), 1, 1)
-                )
+                ResidenceSpell(ME, pid, start=date(target_year - years, 1, 1))
             )
 
     return TaxCase(

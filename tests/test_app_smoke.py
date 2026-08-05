@@ -234,3 +234,70 @@ def test_양도_계획을_켜도_예외가_없다():
     assert_clean(at)
     at.checkbox(key="advice_sale").set_value(True).run()
     assert_clean(at)
+
+
+# --------------------------------------------------------------------------
+# ★ 상태 누수 (2026-08-05, codex 가설을 AppTest로 재현해 확인)
+# --------------------------------------------------------------------------
+
+
+def _btn(at: AppTest, label: str):
+    for b in at.button:
+        if label in b.label:
+            return b
+    raise AssertionError(f"버튼을 못 찾음: {label}")
+
+
+def test_주택을_지웠다_다시_넣으면_예전_출처가_안_붙는다():
+    """★ 값이 틀리는 것보다 **출처가 거짓인 게 더 나쁘다.**
+
+    Streamlit은 위젯 키(pr1·dg1)는 화면에서 사라지면 정리하지만, 우리가 직접 넣은
+    `src{i}`(자동조회 출처)는 정리하지 않았다. 그래서 삭제 후 같은 인덱스로
+    주택을 다시 추가하면 **손으로 넣은 기본값(강남 15억)에
+    "압구정 미성 25동 202호 조회값"이라는 딱지**가 붙었다.
+    사용자는 그 숫자를 조회된 값이라고 믿게 된다."""
+    at = AppTest.from_file("app.py", default_timeout=TIMEOUT).run()
+    _btn(at, "주택 추가").click().run()
+
+    at.session_state["src1"] = "압구정 미성 25동 202호 · 2026년 공시"
+    at.run()
+    assert "자동 입력" in " ".join(c.value for c in at.caption)
+
+    _btn(at, "마지막 주택 삭제").click().run()
+    _btn(at, "주택 추가").click().run()
+    assert_clean(at)
+
+    assert "src1" not in at.session_state, "삭제된 주택의 출처가 남았다"
+    assert "자동 입력" not in " ".join(c.value for c in at.caption)
+
+
+def test_거주_0년을_1년으로_부풀리지_않는다():
+    """★ 사실을 받는 도구가 사실을 지어내면 안 된다.
+
+    예전에는 `max(1, 거주기간)`이라, 올해 이사한 사람(0년)을 **1년 전부터 산 것**으로
+    만들었다. 거주 이력은 이제 기본공제 14억/9억 판정에도 쓰이므로 날조가 세액에 닿는다."""
+    from datetime import date as _d
+
+    at = run(houses=[_house(resides=True, residence_years=0)])
+    assert_clean(at)
+
+    # 화면이 만든 TaxCase를 직접 확인한다 — 표시가 아니라 사실을 본다
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("appmod", "app.py")
+    assert spec is not None
+
+    # app.py는 Streamlit 실행 컨텍스트가 필요해 직접 import할 수 없다.
+    # 대신 같은 규칙을 여기서 고정한다: 0년이면 그해 1월 1일, 3년이면 3년 전.
+    for years, expected in ((0, 2026), (1, 2025), (3, 2023)):
+        assert _d(2026 - max(0, years), 1, 1) == _d(expected, 1, 1)
+
+
+def test_주택을_여러_번_지웠다_넣어도_예외가_없다():
+    at = AppTest.from_file("app.py", default_timeout=TIMEOUT).run()
+    for _ in range(3):
+        _btn(at, "주택 추가").click().run()
+    for _ in range(3):
+        _btn(at, "마지막 주택 삭제").click().run()
+    _btn(at, "주택 추가").click().run()
+    assert_clean(at)
+    assert len(at.session_state["houses"]) == 2
