@@ -1,0 +1,154 @@
+# 배우자 증여 — **절세 전략의 비용을 계산하기 위한 최소 집합**.
+#
+# 이 서비스는 증여세를 계산하는 서비스가 아니다. 그런데 "부부간에 지분을 나누면
+# 종부세가 줄어든다"는 조언을 하려면 **그 대가**를 같이 계산해야 한다.
+# 절감액만 크게 써 놓고 증여세·취득세를 빼면 그건 조언이 아니라 유인이다.
+#
+# 그래서 범위를 **배우자 증여 한 가지로** 못 박는다. 직계존비속 증여, 상속,
+# 저가양수 등은 담지 않는다. 담을 수 있는 척하면 쓰는 사람이 그걸 믿는다.
+#
+# 값 출처 — 전부 2026-08-05 법제처 Open API(type=XML) 원문 확인.
+#   상증세법 MST 276123 (시행 2026-01-02) §53 §56 §69
+#   지방세법 MST 282559 (시행 2026-07-01) §6 §11 §13의2
+
+---
+rule_id: gift.spouse.deduction
+unit: KRW
+description: |
+  배우자 증여재산 공제(상증세법 §53①1호).
+
+  조문 원문:
+    "거주자가 다음 각 호의 어느 하나에 해당하는 사람으로부터 증여를 받은 경우에는
+     다음 각 호의 구분에 따른 금액을 증여세 과세가액에서 공제한다. 이 경우 그
+     증여세 과세가액에서 공제받을 금액과 수증자가 그 증여를 받기 **전 10년 이내에
+     공제받은 금액**을 합한 금액이 … 초과하는 경우에는 그 초과하는 부분은 공제하지
+     아니한다.
+       1. 배우자로부터 증여를 받은 경우: **6억원**"
+
+  ⚠️ **10년 합산이다.** 이미 배우자에게 증여한 이력이 있으면 그만큼 줄어든다.
+     엔진은 과거 증여 이력을 입력받지 않으므로 6억을 그대로 쓰되, 화면이 이 사실을
+     반드시 밝힌다. 모르는 것을 유리하게 가정하는 자리가 여기다.
+blocks:
+  - id: spouse-600m
+    tracks: [current, reform]
+    effective_from: 2008-01-01
+    basis: {law: 상속세 및 증여세법, article: "53", clause: "1", item: "1", mst: "276123"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=276123&JO=005300&type=XML", fetched_at: 2026-08-05}
+    certainty: enacted
+    value: 600000000
+
+---
+rule_id: gift.rate_table
+unit: rate
+description: |
+  증여세 세율. **상증세법 §56이 §26(상속세 세율)을 그대로 준용한다.**
+
+    §56 "증여세는 제55조에 따른 과세표준에 **제26조에 규정된 세율**을 적용하여
+         계산한 금액으로 한다"
+
+  법문이 "기초금액 + 초과금액의 세율" 형식이라 base_amount를 그대로 옮긴다.
+  화면 대입식이 조문과 글자 그대로 같아야 사용자가 검산할 수 있다.
+
+  ⚠️ 법제처 API는 이 표를 **이미지로** 준다(JSON·HTML). XML로 받아야 텍스트가 나온다.
+blocks:
+  - id: gift-rate-current
+    tracks: [current, reform]
+    effective_from: 2000-01-01
+    basis: {law: 상속세 및 증여세법, article: "26", mst: "276123"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=276123&JO=002600&type=XML", fetched_at: 2026-08-05}
+    certainty: enacted
+    table:
+      - {upto: 100000000, rate: "0.10"}
+      - {upto: 500000000, rate: "0.20", base_amount: 10000000}
+      - {upto: 1000000000, rate: "0.30", base_amount: 90000000}
+      - {upto: 3000000000, rate: "0.40", base_amount: 240000000}
+      - {upto: null, rate: "0.50", base_amount: 1040000000}
+
+---
+rule_id: gift.filing_credit
+unit: rate
+description: |
+  신고세액공제(상증세법 §69②).
+
+    "증여세 과세표준을 신고한 경우에는 증여세산출세액 … 의 **100분의 3**에
+     상당하는 금액을 공제한다"
+
+  기한 내 신고가 전제다. 증여일이 속하는 달의 말일부터 3개월 이내(§68①).
+blocks:
+  - id: filing-3pct
+    tracks: [current, reform]
+    effective_from: 2019-01-01
+    basis: {law: 상속세 및 증여세법, article: "69", clause: "2", mst: "276123"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=276123&JO=006900&type=XML", fetched_at: 2026-08-05}
+    certainty: enacted
+    value: "0.03"
+
+---
+rule_id: gift.acquisition_tax
+unit: rate
+description: |
+  증여(무상취득) 취득세율.
+
+    지방세법 §11①2 "제1호 외의 **무상취득: 1천분의 35**"
+
+  ★ 조정대상지역 중과 — §13의2②
+    "조정대상지역에 있는 주택으로서 대통령령으로 정하는 **일정가액 이상**의 주택을
+     … 무상취득을 원인으로 취득하는 경우에는 … 같은 항 제7호나목의 세율(1천분의 40)을
+     표준세율로 하여 해당 세율에 **중과기준세율의 100분의 400**을 합한 세율을 적용한다"
+
+    중과기준세율 = 1천분의 20 (§6 19호)
+    → 4% + (2% × 4) = **12%**
+
+  ⚠️ '일정가액'은 시행령 소관이고 이 룰셋은 그 시행령 조문을 아직 확인하지 않았다.
+     그래서 중과 여부를 **자동 판정하지 않고** 두 값을 모두 보여준다.
+     확인 못 한 것을 확인한 척하지 않는다.
+
+  ⚠️ 지방교육세·농어촌특별세가 별도로 붙는다. 이 룰셋은 취득세 본세만 담는다.
+blocks:
+  - id: acq-gift-standard
+    tracks: [current, reform]
+    effective_from: 2011-01-01
+    selector: {regulated_heavy: false}
+    basis: {law: 지방세법, article: "11", clause: "1", item: "2", mst: "282559"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=282559&JO=001100&type=XML", fetched_at: 2026-08-05}
+    certainty: enacted
+    value: "0.035"
+
+  - id: acq-gift-regulated
+    tracks: [current, reform]
+    effective_from: 2020-08-12
+    selector: {regulated_heavy: true}
+    basis: {law: 지방세법, article: "13-2", clause: "2", mst: "282559"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=282559&JO=001302&type=XML", fetched_at: 2026-08-05}
+    certainty: enacted
+    value: "0.12"
+    note: "표준세율 4%(§11①7나) + 중과기준세율 2%×400% = 12%"
+
+---
+rule_id: gift.spouse_carryover_years
+unit: count
+description: |
+  ★ **이 전략의 가장 큰 함정** — 이월과세(소득세법 §97의2①).
+
+    "거주자가 양도일부터 소급하여 **10년** 이내에 그 배우자 … 로부터 증여받은
+     자산의 양도차익을 계산할 때 양도가액에서 공제할 필요경비는 … 다음 기준을 적용한다.
+       1. **취득가액은** 거주자의 배우자 … 가 해당 자산을 **취득할 당시의 금액**으로 한다.
+       3. 거주자가 해당 자산에 대하여 납부하였거나 납부할 **증여세 상당액**이 있는
+          경우 필요경비에 산입한다."
+
+  즉 배우자에게 증여한 뒤 10년 안에 팔면 취득가액이 **증여 당시 시가가 아니라
+  원래 취득가**로 돌아간다. 증여로 취득가액을 높여 양도세를 줄이려는 시도가
+  봉쇄되고, 오히려 증여세·취득세만 낸 꼴이 될 수 있다.
+
+  ⚠️ 2023.12.31 개정으로 5년 → **10년**으로 늘었다. 기억으로 5년이라 쓰면 틀린다.
+
+  종부세 절감 목적의 증여라도 이 기간 안에 매도 계획이 있으면 손익이 뒤집힌다.
+  그래서 전략을 제시할 때 **반드시 함께 말한다.**
+blocks:
+  - id: carryover-10y
+    tracks: [current, reform]
+    effective_from: 2023-01-01
+    basis: {law: 소득세법, article: "97-2", clause: "1", mst: "280405"}
+    source: {kind: law_api, url: "https://www.law.go.kr/DRF/lawService.do?target=eflawjosub&MST=280405&JO=009702&type=XML", fetched_at: 2026-08-05}
+    certainty: enacted
+    value: 10

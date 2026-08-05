@@ -536,13 +536,36 @@ with tab_holding:
         st.caption("절감액은 추정이 아니라 조건을 바꿔 **다시 계산한 차액**입니다.")
         for s in con.beneficial:
             with st.container(border=True):
-                st.markdown(f"**{s.label_ko}** — {format_manwon(s.saving)} 절감")
+                head = f"**{s.label_ko}** — {format_manwon(s.saving)} 절감"
+                # 일회성 비용이 드는 대안은 **회수기간**이 실제 판단 기준이다.
+                # 4년 누적 절감액만 보여주면 비교 창의 길이가 결론을 만든다.
+                if s.upfront_cost > 0 and s.payback_years not in (None, float("inf")):
+                    head += (
+                        f" · 초기비용 {format_manwon(s.upfront_cost)} · "
+                        f"**약 {s.payback_years:.1f}년이면 본전**"
+                    )
+                st.markdown(head)
                 st.markdown(s.what_to_do_ko)
                 st.caption(f"근거 · {s.basis_ko}")
                 if s.requirements_ko:
                     st.markdown("**요건**\n" + "\n".join(f"- {r}" for r in s.requirements_ko))
                 if s.caveats_ko:
                     st.markdown("**주의**\n" + "\n".join(f"- {c}" for c in s.caveats_ko))
+
+    # ★ "하면 손해"도 절세 정보다. 통념과 반대인 결론일수록 그렇다 —
+    #   "배우자에게 증여하면 절세된다"는 널리 퍼져 있지만 1주택자에게는
+    #   1세대1주택 세액공제(최대 80%)를 잃어 오히려 손해다.
+    #   이걸 안 보여주면 사용자는 다른 데서 듣고 그대로 한다.
+    harmful = [s for s in con.strategies if s.saving < 0]
+    if harmful:
+        st.markdown("## 하지 않는 편이 나은 것")
+        st.caption("흔히 절세로 알려졌지만 이 상황에서는 **오히려 손해**로 계산된 대안입니다.")
+        for s in harmful:
+            with st.container(border=True):
+                st.markdown(f"**{s.label_ko}** — {format_manwon(-s.saving)} 손해")
+                st.caption(f"근거 · {s.basis_ko}")
+                if s.caveats_ko:
+                    st.markdown("\n".join(f"- {c}" for c in s.caveats_ko))
 
     if has_spouse and len(st.session_state.houses) == 1:
         cmp = compare_joint_spouse_election(case, ME, rs, track=effective_track, options=opts)
