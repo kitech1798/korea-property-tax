@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from datetime import date
 from fractions import Fraction
@@ -67,6 +68,29 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 st.markdown(CSS, unsafe_allow_html=True)
+
+
+def _bootstrap_keys() -> None:
+    """배포 환경의 비밀값을 환경변수로 옮긴다.
+
+    `realestate_tax/sources/`는 Streamlit을 모른다 — 순수 파이썬이라 테스트가
+    쉽고 다른 프론트엔드에도 붙일 수 있다. 그래서 `os.environ`만 읽는다.
+    Streamlit Cloud는 값을 `st.secrets`로 주므로, **경계인 여기서** 한 번만 옮긴다.
+
+    ⚠️ 키는 저장소에 없다. 로컬은 사용자 환경변수, 배포는 Cloud Secrets다.
+    """
+    for name in ("JUSO_CONFM_KEY", "DATA_GO_KR_KEY"):
+        if os.environ.get(name):
+            continue
+        try:
+            value = st.secrets[name]
+        except Exception:  # secrets.toml이 없으면 그냥 없는 것이다
+            continue
+        if value:
+            os.environ[name] = str(value)
+
+
+_bootstrap_keys()
 
 
 @st.cache_resource
