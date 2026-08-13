@@ -160,10 +160,29 @@ def test_경계를_표본에서_빼면_잡힌다(scenario, outcome, rs, monkeypa
 
 
 def test_최적안이_제약을_무시하면_잡힌다(scenario_early, outcome, rs, monkeypatch):
-    """`best`가 팔 수 없는 날을 고르도록 만든다.
+    """`best`가 팔 수 없는 날을 고르는 창을 만들어 검사기에 먹인다.
 
-    임차인이 사는 동안이 검토 구간에 들어 있어야 잡을 수 있으므로 `scenario_early`를 쓴다.
+    ⚠️ 예전에는 `SellWindow.best`만 뒤집고 실제 optimize 결과에 기댔다. 그런데
+       보유기간이 매도일을 따라 움직이도록 고치자(2026-08-13) 이른 날짜는 보유가
+       짧아 항상 더 비싸졌고, 막힌 구간에 '가장 싼 날'이 생기지 않아 변이가
+       발동하지 않았다.
+       **검사기를 시험하려면 검사기에 줄 데이터를 직접 만들어야 한다** —
+       엔진이 그 데이터를 우연히 만들어 주기를 기다리면 안 된다.
     """
+    real = sw.optimize
+
+    def fake(*args, **kwargs):
+        w = real(*args, **kwargs)
+        blocked = next((p for p in w.points if not p.feasible), None)
+        if blocked is None:
+            return w
+        cheap = sw.WindowPoint(on=blocked.on, transfer_tax=1, blocked_by=blocked.blocked_by)
+        others = tuple(p for p in w.points if p.on != blocked.on)
+        return SellWindow(points=(cheap,) + others, constraints=w.constraints,
+                          property_label=w.property_label)
+
+    monkeypatch.setattr(sw, "optimize", fake)
+    monkeypatch.setattr("sim.invariants.optimize", fake)
     monkeypatch.setattr(
         SellWindow, "best",
         property(lambda self: min(self.points, key=lambda p: (p.transfer_tax, p.on))),

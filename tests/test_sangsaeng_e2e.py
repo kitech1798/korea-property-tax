@@ -139,18 +139,21 @@ def test_비과세_차이가_세액으로_나타난다(rs: RuleSet):
 # 재혁 사건(기한 2028-01-31)으로는 '29년 공제율을 관찰할 수 없어서 따로 만든다.
 PRIOR_LATE = LeaseSpell(
     property_id=HOUSE,
-    start=date(2024, 7, 1),
-    end=date(2026, 12, 31),
+    start=date(2024, 6, 1),
+    end=date(2026, 11, 30),
     deposit=5 * EOK,
-    contracted_on=date(2024, 5, 10),
+    contracted_on=date(2024, 4, 10),
     down_payment_evidenced=True,
 )
 SANGSAENG_LATE = LeaseSpell(
     property_id=HOUSE,
-    start=date(2027, 1, 1),
-    end=date(2028, 12, 31),
+    # ⚠️ 상생임대차계약은 **체결과 임대개시가 모두** '26.12.31. 안이어야 한다
+    #    (상세본 p.78 ➋). 개시는 '26년에 하고 종료만 늦은 계약을 쓴다.
+    #    예전 픽스처는 '27.1.1. 개시라 법적으로 성립할 수 없는 사건이었다.
+    start=date(2026, 12, 1),
+    end=date(2028, 11, 30),
     deposit=520_000_000,
-    contracted_on=date(2026, 11, 15),
+    contracted_on=date(2026, 10, 15),
     down_payment_evidenced=True,
 )
 

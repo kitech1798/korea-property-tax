@@ -80,10 +80,20 @@ def full_months(start: date, until: date) -> int:
        이 함수의 `until`은 제외다. 임대기간을 잴 때는 종료일 **다음 날**을 넘겨야
        한다. 2025-02-01~2027-01-31 전세는 24개월이지 23개월이 아니다.
        이 하루가 2년 요건을 통째로 뒤집는다.
+
+    ★ 말일로 당겨진 달은 **하루를 더 요구한다**(2026-08-13 감사에서 잡힘).
+
+      민법 §160③상 2025-08-31의 18개월은 2027-02-28에 만료한다(2월에 31일이 없다).
+      그런데 단순히 `min(start.day, 말일)`로 비교하면 2027-02-27에 끝난 계약도
+      18개월로 읽힌다 — **하루 모자란 임대차가 1년 6개월 요건을 통과한다.**
+      요건을 통과시키는 방향이라 과소신고가 되므로, 당겨진 달에서는 만료일을
+      **지나야** 만 개월로 센다.
     """
     months = (until.year - start.year) * 12 + (until.month - start.month)
-    anniversary_day = min(start.day, monthrange(until.year, until.month)[1])
-    if until.day < anniversary_day:
+    last_day = monthrange(until.year, until.month)[1]
+    anniversary_day = min(start.day, last_day)
+    clamped = start.day > last_day
+    if until.day < anniversary_day or (clamped and until.day == anniversary_day):
         months -= 1
     return max(0, months)
 

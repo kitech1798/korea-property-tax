@@ -28,6 +28,7 @@ from enum import StrEnum
 
 from ..domain import LeaseOrigin, LeaseSpell, PropertyId, TaxCase, Won
 from ..rules import RuleSet, Track
+from . import periods
 from .periods import plus_months
 from .sangsaeng import assess as sangsaeng_assess
 from .transfer_tax import TransferEvent, compute_transfer_tax
@@ -178,9 +179,28 @@ def lease_constraints(
     경로로 온다 — 통지기한을 놓쳐 묵시적으로 갱신되거나(§6①②), 임차인이 갱신
     요구권을 행사하거나(§6의3①②). 어느 쪽이든 존속기간은 2년이라 결과가 같다.
     """
+    leases = case.leases_of(property_id)
     lease = _current_lease(case, property_id)
+
+    # ⚠️ 임대차가 있는데 종료일이 하나도 없으면 예전에는 **조용히 제약 0건**이었다.
+    #    세입자가 사는데 아무 기한도 안 뜨는 화면이 나온다(2026-08-13 감사).
     if lease is None or lease.actual_end is None:
-        return (), None
+        if not leases:
+            return (), None
+        return (
+            Constraint(
+                kind=ConstraintKind.RISK,
+                label_ko="임대차 종료일 미상",
+                basis_ko="주택임대차보호법 §4①",
+                action_ko="임대차 종료일을 입력해주세요.",
+                note_ko=(
+                    "종료일을 모르면 갱신거절 통지기한도 공실 인도 가능일도 계산할 수 "
+                    "없습니다. 기간을 정하지 않았거나 2년 미만으로 정한 임대차는 "
+                    "**2년으로 봅니다**(§4①. 다만 임차인은 2년 미만이 유효함을 주장할 수 "
+                    "있습니다)."
+                ),
+            ),
+        ), None
 
     res = ruleset.resolve_or_none(NOTICE_RULE, on=on, track=track)
     if res is None:
@@ -192,6 +212,33 @@ def lease_constraints(
     notice_from = plus_months(end, -int(win["earliest"]))
     notice_to = plus_months(end, -int(win["latest"]))
     renew_years = int(p["tenant_renewal_right_years"])
+
+    # ⚠️ 이미 끝난 계약을 '현 임대차'로 삼아 지나간 통지기한을 시키고 있었다
+    #    (2026-08-13 감사 — 법률·이용자 두 관점). 20개월 전 날짜를 두고
+    #    "통지해야 합니다"라고 하면 사용자는 무엇을 해야 할지 알 수 없다.
+    #
+    #    만기가 지났으면 두 갈래다 — 임차인이 나갔거나, 묵시적으로 갱신됐거나(§6①②).
+    #    엔진은 어느 쪽인지 모른다. **단정하지 않고 묻는다.**
+    if end < on:
+        return (
+            Constraint(
+                kind=ConstraintKind.RISK,
+                label_ko="이미 끝난 임대차",
+                on=end,
+                basis_ko="주택임대차보호법 §6①②",
+                action_ko=(
+                    f"입력된 임대차는 {end}에 이미 끝났습니다. "
+                    "임차인이 나갔는지, 묵시적으로 갱신됐는지 확인해주세요."
+                ),
+                note_ko=(
+                    f"만기 6개월 전~2개월 전({notice_from}~{notice_to})에 갱신거절을 "
+                    "통지하지 않았다면 전 임대차와 같은 조건으로 갱신되고 존속기간은 "
+                    f"{int(p['implied_renewal_years'])}년입니다(§6①②). 갱신됐다면 "
+                    f"공실 인도는 {plus_months(end, 12 * int(p['implied_renewal_years']))} "
+                    "이후가 됩니다. 현재 임대차를 입력해주시면 기한을 다시 계산합니다."
+                ),
+            ),
+        ), None
 
     out: list[Constraint] = [
         Constraint(
@@ -331,6 +378,36 @@ def _candidates(start: date, end: date, marks: list[date]) -> tuple[date, ...]:
     return tuple(sorted(d for d in pool if start <= d <= end))
 
 
+def _event_on(event: TransferEvent, case: TaxCase, on: date) -> TransferEvent:
+    """양도일을 옮기면 **보유·거주기간도 함께 움직인다.**
+
+    ⚠️ 2026-08-13 멀티에이전트 감사에서 세무·개발·이용자 세 관점이 독립적으로 잡았다.
+       예전에는 `replace(event, transfer_date=on)`만 했다. 그런데 `compute_transfer_tax`는
+       명시된 `holding_years`가 있으면 취득일에서 도출한 값 대신 그 명시값을 쓰고,
+       화면은 항상 명시값을 넣는다. 그래서 2026년에 팔든 2030년에 팔든 보유기간이
+       고정됐고, **이 모듈의 존재 이유인 절벽이 곡선에서 통째로 사라졌다** —
+       보유 2년 도달로 단기세율(60·70%)을 벗어나는 자리, 장기보유공제가 해마다
+       오르는 자리가 전부 평평해졌다.
+
+    처리
+      · 취득일을 알면 **명시값을 지운다.** 엔진이 날짜별로 다시 도출한다(가장 정확).
+      · 취득일을 모르면 지울 수 없으므로(도출이 None이 되어 판정 불가로 흐른다)
+        경과한 햇수만큼 **더해서** 옮긴다.
+      · 거주기간은 **옮기지 않는다.** 스칼라만으로는 아직 살고 있는지 알 수 없고,
+        늘리는 쪽이 세금을 낮추므로 모르는 채 늘리면 과소신고가 된다.
+        거주 이력(ResidenceSpell)이 있으면 첫 경로에서 정확히 도출된다.
+    """
+    acquired = periods.acquisition_date(case, event.person_id, event.property_id)
+    if acquired is not None:
+        return replace(event, transfer_date=on, holding_years=None)
+
+    hold = event.holding_years
+    if hold is not None:
+        moved = periods.full_years(event.transfer_date, on)
+        hold = max(0, hold + moved)
+    return replace(event, transfer_date=on, holding_years=hold)
+
+
 def optimize(
     case: TaxCase,
     event: TransferEvent,
@@ -365,7 +442,7 @@ def optimize(
 
     points: list[WindowPoint] = []
     for on in _candidates(start, end, marks):
-        sale = replace(event, transfer_date=on)
+        sale = _event_on(event, case, on)
         result = compute_transfer_tax(case, sale, ruleset, track=track)
 
         blocked: tuple[str, ...] = ()

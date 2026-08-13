@@ -186,13 +186,29 @@ def test_절벽은_하루_차이로_잡힌다(window):
 # --------------------------------------------------------------------------
 
 
-def test_최적안은_2027년이다(window):
-    """공실 인도가 가능해지는 2027-02-01부터 2027-12-31까지 세액이 같으므로,
-    동점이면 이른 날을 든다 — 늦출 이유가 없고 늦출수록 위험만 는다."""
+def test_최적안은_보유_10년이_되는_날이다(window):
+    """★ 2026-08-13 회귀 — 예전에는 2027-02-01(공실 인도 첫날)이 답이었다.
+
+    그때는 `optimize()`가 후보일마다 날짜만 바꾸고 **보유기간을 고정**해서,
+    보유기간이 만드는 절벽이 곡선에서 통째로 사라져 있었다. 세무·개발·이용자
+    세 관점이 독립적으로 같은 결함을 짚었다.
+
+    취득일이 2017-03-01이므로 보유 10년은 **2027-03-01**에 찬다. 장기보유공제가
+    거기서 한 단 오르므로, 한 달을 더 기다리는 것이 답이다.
+    공실 인도(2027-02-01)만 보고 고르면 그 한 달을 놓친다.
+    """
     best = window.best
     assert best is not None
-    assert best.on == date(2027, 2, 1)
+    assert best.on == date(2027, 3, 1)
+    assert best.transfer_tax < at(window, date(2027, 2, 1)), "보유 10년 절벽이 안 보인다"
     assert best.transfer_tax < at(window, date(2028, 1, 31))
+
+
+def test_보유기간이_매도일을_따라_움직인다(window):
+    """이 모듈의 존재 이유. 날짜만 바꾸고 기간을 고정하면 곡선이 평평해진다."""
+    early = at(window, date(2026, 9, 1))    # 보유 9년
+    later = at(window, date(2027, 3, 1))    # 보유 10년
+    assert early != later, "보유기간이 안 움직인다 — 곡선이 평평하다"
 
 
 def test_임차인이_사는_동안은_고르지_않는다(window):
@@ -263,3 +279,40 @@ def test_임대차가_없으면_제약도_없다(rs: RuleSet):
                  start=date(2027, 1, 1), end=date(2027, 12, 31))
     assert w.constraints == ()
     assert w.best is not None
+
+
+def test_이미_끝난_임대차에_지나간_통지기한을_시키지_않는다(rs: RuleSet):
+    """★ 2026-08-13 감사(법률·이용자 두 관점).
+
+    만기가 지난 계약을 '현 임대차'로 삼아 20개월 전 날짜를 두고 "통지해야 합니다"라고
+    시키고 있었다. 사용자가 무엇을 해야 할지 알 수 없는 안내다.
+
+    만기가 지났으면 두 갈래다 — 임차인이 나갔거나 묵시적으로 갱신됐거나(§6①②).
+    엔진은 모른다. **단정하지 않고 묻는다.**
+    """
+    w = optimize(make_case(PRIOR, SANGSAENG), EVENT, rs,
+                 start=date(2028, 6, 1), end=date(2029, 12, 31))
+    assert not [c for c in w.constraints if c.kind is ConstraintKind.DEADLINE
+                and "통지" in c.label_ko], "이미 지난 통지기한을 시켰다"
+    risk = next(c for c in w.constraints if "끝난 임대차" in c.label_ko)
+    assert risk.kind is ConstraintKind.RISK
+    assert "갱신" in risk.note_ko and "§6①②" in risk.note_ko
+    assert "확인해주세요" in risk.action_ko
+    # 이미 끝났으므로 매도를 막지 않는다
+    assert all(p.feasible for p in w.points)
+
+
+def test_종료일이_없으면_조용히_넘어가지_않는다(rs: RuleSet):
+    """★ 예전에는 임대차가 있어도 제약 0건으로 조용히 지나갔다.
+    세입자가 사는데 아무 기한도 안 뜨는 화면이 된다."""
+    open_ended = LeaseSpell(
+        property_id=HOUSE, start=date(2025, 2, 1), end=None,
+        deposit=5 * EOK, contracted_on=date(2024, 12, 15),
+        down_payment_evidenced=True, tenant_ref=TENANT,
+    )
+    w = optimize(make_case(open_ended), EVENT, rs,
+                 start=date(2026, 8, 13), end=date(2028, 12, 31))
+    assert w.constraints, "임대차가 있는데 제약이 0건이다"
+    risk = w.constraints[0]
+    assert risk.kind is ConstraintKind.RISK
+    assert "§4①" in risk.basis_ko  # 기간 미정은 2년으로 본다

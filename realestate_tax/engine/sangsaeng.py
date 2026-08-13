@@ -194,6 +194,20 @@ def assess(
         else:
             ok.append(f"체결일 {lease.contracted_on} — 기한 내")
 
+        # ── 임대 개시 시기 ───────────────────────────────────────────
+        # ⚠️ 2026-08-13 감사에서 잡힌 누락 — 체결일만 보고 있었다.
+        #    §155의3①1호는 "…기간 중에 체결(…)하고 **임대를 개시할 것**"이고,
+        #    상세본 p.78이 요건을 "'21.12.20.~'26.12.31. 중 계약체결 **및 임대개시**"로
+        #    풀어 적는다. 둘 다 기한 안이어야 한다.
+        #    체결은 '26.12.31.에 하고 임대는 '27년에 시작한 계약이 통과하고 있었다.
+        if not (window["from"] <= lease.start <= window["to"]):
+            fail.append(
+                f"임대 개시일 {lease.start}이 {window['from']}~{window['to']} 밖입니다 "
+                "— 체결과 임대개시가 모두 기한 안이어야 합니다(상세본 p.78)"
+            )
+        else:
+            ok.append(f"임대 개시 {lease.start} — 기한 내")
+
         # ── 계약금 지급 증빙 ─────────────────────────────────────────
         if p.get("require_down_payment_evidence"):
             if lease.down_payment_evidenced is None:

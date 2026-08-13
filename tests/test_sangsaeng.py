@@ -100,6 +100,29 @@ def test_직전계약_1년6개월은_18개월이다():
     assert _lease_months(lease("2023-08-02", "2025-01-31", 5 * EOK)) == 17
 
 
+@pytest.mark.parametrize(
+    "start, end, expected",
+    [
+        # 2025-08-31의 18개월은 민법 §160③상 2027-02-28에 만료한다(2월엔 31일이 없다).
+        ("2025-08-31", "2027-02-28", 18),   # 만료일까지 임대 — 충족
+        ("2025-08-31", "2027-02-27", 17),   # ★ 하루 모자람 — 예전에는 18로 읽혔다
+        ("2025-08-31", "2027-03-01", 18),   # 하루 더 — 여전히 18(19가 아니다)
+        # 말일로 당겨지지 않는 달은 영향이 없어야 한다
+        ("2025-01-31", "2027-01-30", 24),
+        ("2025-01-31", "2027-01-29", 23),
+        ("2025-02-01", "2027-01-31", 24),
+    ],
+)
+def test_말일로_당겨진_달은_하루를_더_요구한다(start, end, expected):
+    """★ 2026-08-13 멀티에이전트 감사에서 잡힌 경계.
+
+    `min(start.day, 말일)`로만 비교하면 만료일 하루 전에 끝난 계약도 만 개월로
+    읽힌다. 요건을 **통과시키는** 방향이라 과소신고가 된다.
+    말일에 시작하는 전세는 드물지 않다.
+    """
+    assert _lease_months(lease(start, end, 5 * EOK)) == expected
+
+
 def test_1개월_미만은_1개월로_본다():
     """§155의3③ 후단."""
     assert _lease_months(lease("2025-02-01", "2025-02-10", 5 * EOK)) == 1
@@ -178,6 +201,21 @@ def test_상생임대차가_2년_미만이면_탈락한다(rs: RuleSet):
     v = assess(make_case(PRIOR, short), HOUSE, rs, on=date(2027, 6, 1), track=Track.CURRENT)
     assert not v.applies
     assert any("23개월" in r for r in v.reasons_ko)
+
+
+def test_임대개시가_기한_밖이면_탈락한다(rs: RuleSet):
+    """★ 2026-08-13 멀티에이전트 감사(원문대조)에서 잡힌 누락.
+
+    §155의3①1호는 "…기간 중에 체결(…)하고 **임대를 개시할 것**"이고, 상세본 p.78이
+    요건을 "'21.12.20.~'26.12.31. 중 계약체결 **및 임대개시**"로 풀어 적는다.
+    예전에는 체결일만 봐서, '26.12.31.에 계약하고 '27년에 임대를 시작한 계약이
+    통과했다.
+    """
+    late_start = lease("2027-01-01", "2029-01-31", 520_000_000, contracted="2026-12-20")
+    v = assess(make_case(PRIOR, late_start), HOUSE, rs,
+               on=date(2029, 6, 1), track=Track.CURRENT)
+    assert not v.applies
+    assert any("임대 개시일" in r for r in v.reasons_ko)
 
 
 def test_체결일이_기한_밖이면_탈락한다(rs: RuleSet):
@@ -292,21 +330,32 @@ def test_2026년_안에_끝난_계약은_2027_12_31까지다(rs: RuleSet):
 
 
 def test_2029년을_넘는_기한은_2029_12_31로_잘린다(rs: RuleSet):
-    """상세본 p.78 ➋ — "계약종료 후 1년이 되는 날과 '29.12.31. 중 **빠른 날**"."""
-    prior = lease("2024-07-01", "2026-12-31", 5 * EOK, contracted="2024-05-10")
-    late = lease("2027-01-01", "2029-12-31", 520_000_000, contracted="2026-11-15")
+    """상세본 p.78 ➋ — "계약종료 후 1년이 되는 날과 '29.12.31. 중 **빠른 날**".
+
+    ⚠️ 상생임대차계약은 **체결과 임대개시가 모두** '26.12.31. 안이어야 한다
+       (상세본 p.78 ➋). 그래서 '27년에 개시하는 계약으로는 이 분기를 시험할 수 없다.
+       개시는 '26년, 종료는 '29년인 긴 계약을 쓴다.
+    """
+    prior = lease("2024-06-01", "2026-11-30", 5 * EOK, contracted="2024-04-10")
+    late = lease("2026-12-01", "2029-01-31", 520_000_000, contracted="2026-10-15")
     v = assess(make_case(prior, late), HOUSE, rs, on=date(2029, 6, 1), track=Track.REFORM)
     assert v.applies
-    assert v.transfer_deadline == date(2029, 12, 31)  # 2030-12-31이 아니라 절단된다
+    # 2029-01-31 + 1년 = 2030-01-31이지만 '29.12.31. 상한에서 잘린다
+    assert v.transfer_deadline == date(2029, 12, 31)
 
 
 def test_요건을_만족하는_쌍이_여럿이면_늦게_끝난_쪽을_든다(rs: RuleSet):
     """법은 어느 쌍을 쓰라고 정하지 않는다. 양도기한이 상생임대차계약 종료일에
-    붙으므로 납세자는 늦게 끝난 계약을 든다."""
-    third = lease("2027-02-01", "2029-01-31", 540_000_000, contracted="2026-12-20")
-    v = assess(make_case(PRIOR, SANGSAENG, third), HOUSE, rs,
-               on=date(2029, 6, 1), track=Track.REFORM)
+    붙으므로 납세자는 늦게 끝난 계약을 든다.
+
+    세 계약이 연달아 있으면 쌍이 둘 생긴다 — (A,B)와 (B,C). 둘 다 요건을 갖추면
+    C가 걸린 쪽을 든다. ⚠️ B·C 모두 임대개시가 '26.12.31. 안이어야 한다.
+    """
+    a = lease("2022-01-01", "2023-12-31", 5 * EOK, contracted="2021-12-25")
+    b = lease("2024-01-01", "2025-12-31", 520_000_000, contracted="2023-11-15")
+    c = lease("2026-01-01", "2027-12-31", 540_000_000, contracted="2025-11-15")
+    v = assess(make_case(a, b, c), HOUSE, rs, on=date(2029, 6, 1), track=Track.REFORM)
     assert v.applies
-    assert v.lease is third
-    # 2029-01-31 + 1년 = 2030-01-31이지만 '29.12.31. 상한에서 잘린다
-    assert v.transfer_deadline == date(2029, 12, 31)
+    assert v.lease is c
+    assert v.prior is b
+    assert v.transfer_deadline == date(2028, 12, 31)  # 종료 후 1년

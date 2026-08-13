@@ -290,7 +290,16 @@ with tab_input:
         )
         c1, c2 = st.columns(2)
         if c1.button("＋ 주택 추가", use_container_width=True):
-            st.session_state.houses.append(dict(st.session_state.houses[0], name=f"주택{len(st.session_state.houses) + 1}"))
+            # ⚠️ 첫 주택을 통째로 복사하면 **임대차 이력까지 따라온다**
+            #    (2026-08-13 감사). 세를 준 적 없는 주택에 계약 2건이 생기고,
+            #    그대로 두면 있지도 않은 상생임대 특례가 판정된다.
+            #    임대차는 주택마다 고유한 사실이므로 복사 대상이 아니다.
+            _fresh = {
+                k: v for k, v in st.session_state.houses[0].items()
+                if not (k == "leased" or k.startswith(("prior_", "sang_")) or k == "tenant_ref")
+            }
+            _fresh["leased"] = False
+            st.session_state.houses.append(dict(_fresh, name=f"주택{len(st.session_state.houses) + 1}"))
             st.rerun()
         if c2.button("－ 마지막 주택 삭제", use_container_width=True, disabled=len(st.session_state.houses) <= 1):
             st.session_state.houses.pop()
@@ -617,11 +626,17 @@ def build_case(target_year: int) -> TaxCase:
                         deposit=int(h[f"{slot}_deposit"] * EOK),
                         monthly_rent=int(h[f"{slot}_rent"]) * 10_000,
                         origin=_LEASE_ORIGINS[h[f"{slot}_origin"]],
-                        # 직전계약의 증빙은 요건이 아니다(상생임대차계약만 요건).
+                        # 계약금 증빙은 **상생임대차계약**의 요건이다(§155의3①1호).
+                        #
+                        # ⚠️ 직전 칸에 True를 박아 두면, 사용자가 두 칸을 바꿔 넣었을 때
+                        #    (날짜로는 엔진이 순서를 바로잡는다) 실제 상생계약에
+                        #    'True'가 붙어 **'모름'이라고 답했는데 요건이 통과**한다
+                        #    (2026-08-13 감사). None으로 두면 바꿔 넣어도 판정 불가로
+                        #    흘러 유리한 쪽으로 새지 않는다.
                         down_payment_evidenced=(
                             _EVIDENCED[h.get("sang_evidenced", "모름")]
                             if slot == "sang"
-                            else True
+                            else None
                         ),
                         tenant_ref=h.get("tenant_ref", ""),
                     )
