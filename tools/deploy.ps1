@@ -7,10 +7,16 @@
 #     `_RESUME.md`에 juso 키 발급 기준으로 자택 IP를 메모해 두었는데, 그 커밋이
 #     공개 저장소로 나갔다. 나중에 파일에서 지웠지만 **과거 커밋에는 그대로 남았다.**
 #     이전 스캐너가 못 잡은 이유가 두 가지다.
-#       ① `git rev-parse "HEAD:$Prefix"` — **현재 트리만** 봤다. 과거는 범위 밖이었다.
-#       ② 패턴이 정규식이라 `[REDACTED-IP]` 처럼 **이스케이프된 형태**를 못 잡았다.
-#          사람 눈에는 그대로 읽히는 IP인데 스캐너만 못 봤다.
+#       ① 현재 트리만 봤다. 과거 커밋은 범위 밖이었다.
+#       ② 패턴이 정규식이라 점을 이스케이프한 형태를 못 잡았다.
+#          사람 눈에는 그대로 읽히는 값인데 스캐너만 못 봤다.
 #     그래서 지금은 **이력 전체**를 훑고, 구분자를 지운 **정규화 문자열**로 찾는다.
+#
+# ⚠️ 탐지 문자열을 이 파일에 적지 않는다
+#     이전 판은 조각을 이어 붙여("U01T" + "…") 리터럴을 피하려 했지만, 사람이 읽으면
+#     그대로 보인다. 사고를 설명하는 주석에 실제 IP를 적었다가 이 스캐너에 걸리기도 했다.
+#     지금은 `tools/.secret-needles.txt`(gitignore 대상)에서 읽는다.
+#     **파일이 없으면 배포를 멈춘다** — 스캔을 건너뛰는 것이 가장 나쁜 실패다.
 #
 # 실행
 #     pwsh -File tools/deploy.ps1              # 검사 후 푸시
@@ -57,15 +63,22 @@ Write-Host "  시뮬:   $($sim.Line.Trim())"
 # ── 2. 비밀·개인정보 스캔 (이력 전체) ──────────────────────────────
 # 공개 저장소는 **현재 파일이 아니라 이력 전체**가 공개된다. 지운 것도 과거에 남는다.
 #
-# ⚠️ 패턴을 리터럴로 적으면 이 파일이 스스로 걸린다(첫 실행에서 실제로 걸렸다).
-#    제외하면 정작 여기 붙여넣은 키를 놓치므로, 조각을 이어 붙여 리터럴을 남기지 않는다.
-$needles = @(
-    ("U01T" + "[REDACTED-KEY]"),   # juso 승인키 접두
-    ("5f31e" + "[REDACTED-KEY]"),  # data.go.kr 인증키 접두
-    ("119" + "[REDACTED-IP]"), # 발급 당시 자택 IP
-    ("dune" + "[REDACTED-ACCOUNT]"),     # 개인 계정
-    ("wonjun" + "[REDACTED-EMAIL]")  # 정부 보도자료 담당자 메일
-)
+$needleFile = Join-Path $PSScriptRoot ".secret-needles.txt"
+if (-not (Test-Path $needleFile)) {
+    Write-Host "탐지 문자열 파일이 없습니다: $needleFile" -ForegroundColor Red
+    Write-Host "  한 줄에 하나씩, 이력에 있어서는 안 되는 값을 적으세요" -ForegroundColor Yellow
+    Write-Host "  (인증키 접두·자택 IP·개인 계정 등). 이 파일은 gitignore 대상입니다." -ForegroundColor Yellow
+    Write-Host "  스캔을 건너뛰고 배포하지 않습니다." -ForegroundColor Red
+    exit 1
+}
+# 주석(#)과 빈 줄은 무시한다. 공백은 비교 전에 어차피 지운다.
+$needles = Get-Content $needleFile -Encoding UTF8 |
+    Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith("#") } |
+    ForEach-Object { ($_ -replace '\\', '' -replace '\s', '') }
+if (-not $needles) {
+    Write-Host "탐지 문자열이 비어 있습니다. 배포를 중단합니다." -ForegroundColor Red
+    exit 1
+}
 
 $revs = git rev-list --all
 Write-Host "  비밀 스캔: 커밋 $($revs.Count)개 · 이력 전체"
@@ -76,11 +89,12 @@ foreach ($b in $blobs) {
     if ((git cat-file -t $b 2>$null) -ne "blob") { continue }
     $raw = git cat-file -p $b 2>$null
     if (-not $raw) { continue }
-    # ★ 정규화 — 정규식 이스케이프(`\.`)·공백·따옴표를 지우고 비교한다.
-    #   이 한 줄이 없어서 `[REDACTED-IP]` 을 놓쳤다.
+    # ★ 정규화 — 정규식 이스케이프(역슬래시)와 공백을 지우고 비교한다.
+    #   이 한 줄이 없어서 점을 이스케이프한 IP를 놓쳤다.
     $flat = ($raw -join "`n") -replace '\\', '' -replace '\s', ''
     foreach ($n in $needles) {
-        if ($flat.Contains(($n -replace '\s', ''))) { $leaks += "$b : $n" }
+        # 어떤 값이 걸렸는지는 **앞 4자만** 남긴다. 로그가 새 유출 경로가 되면 안 된다.
+        if ($flat.Contains($n)) { $leaks += "$b : $($n.Substring(0, [Math]::Min(4, $n.Length)))…" }
     }
 }
 if ($leaks) {

@@ -23,3 +23,6 @@ __pycache__/
 # 스크래치
 *.tmp
 _scratch/
+
+# 비밀 탐지 문자열 — 저장소에 두지 않는다(스캐너가 로컬에서 읽는다)
+tools/.secret-needles.txt
