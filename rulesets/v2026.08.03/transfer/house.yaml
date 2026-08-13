@@ -400,9 +400,9 @@ blocks:
     value: "0.30"
 
   # ── '26년 양도분 경과조치 ────────────────────────────────────────────
-  # 상세본 p.85 <특례규정>: "중과세율이 적용된 ’26년 양도분도 ’27.1.1. 이후
+  # 상세본 p.72 <특례규정>: "중과세율이 적용된 ’26년 양도분도 ’27.1.1. 이후
   # 예정·확정신고시 중과세율 완화(2주택 +5%p, 3주택이상 +10%p) 적용"
-  # 개조식 p.22 각주도 "’26년 중 중과를 적용받은 양도분도 포함"이라고 적는다.
+  # 개조식 p.20 각주도 "’26년 중 중과를 적용받은 양도분도 포함"이라고 적는다.
   #
   # ⚠️ 이 완화는 **양도시점이 아니라 신고시점**에 걸린다. 다만 '26년 양도분의
   #    확정신고는 '27년 5월이므로 실질적으로 전부 해당한다. 그래도 조문이 신고를
@@ -413,12 +413,12 @@ blocks:
     effective_to: 2026-12-31
     selector: {house_group: "2"}
     basis: {law: 소득세법, article: "104", clause: "7"}
-    source: {kind: pdf, file: "2. 2026년 세제개편안 상세본.pdf", page: 85}
+    source: {kind: pdf, file: "2. 2026년 세제개편안 상세본.pdf", page: 72}
     certainty: bill_pending
     value: "0.05"
     payload:
       min_holding_years: 2
-      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.22 각주 *)"
+      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.20 각주 *)"
     note: "’27.1.1. 이후 예정·확정신고분에 한정. 확정신고가 ’27.5월이므로 통상 해당한다."
 
   - id: heavy-reform-2026-3house
@@ -427,12 +427,12 @@ blocks:
     effective_to: 2026-12-31
     selector: {house_group: "3+"}
     basis: {law: 소득세법, article: "104", clause: "7"}
-    source: {kind: pdf, file: "2. 2026년 세제개편안 상세본.pdf", page: 85}
+    source: {kind: pdf, file: "2. 2026년 세제개편안 상세본.pdf", page: 72}
     certainty: bill_pending
     value: "0.10"
     payload:
       min_holding_years: 2
-      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.22 각주 *)"
+      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.20 각주 *)"
     note: "’27.1.1. 이후 예정·확정신고분에 한정. 확정신고가 ’27.5월이므로 통상 해당한다."
 
   - id: heavy-reform-2027-2house
@@ -446,7 +446,7 @@ blocks:
     value: "0.05"
     payload:
       min_holding_years: 2
-      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.22 각주 *)"
+      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.20 각주 *)"
 
   - id: heavy-reform-2027-3house
     tracks: [reform]
@@ -459,7 +459,7 @@ blocks:
     value: "0.10"
     payload:
       min_holding_years: 2
-      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.22 각주 *)"
+      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.20 각주 *)"
 
   - id: heavy-reform-2028-2house
     tracks: [reform]
@@ -472,7 +472,7 @@ blocks:
     value: "0.10"
     payload:
       min_holding_years: 2
-      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.22 각주 *)"
+      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.20 각주 *)"
 
   - id: heavy-reform-2028-3house
     tracks: [reform]
@@ -480,17 +480,17 @@ blocks:
     effective_to: 2028-12-31
     selector: {house_group: "3+"}
     basis: {law: 소득세법, article: "104", clause: "7"}
-    source: {kind: pdf, file: "2. 2026년 세제개편안 상세본.pdf", page: 85}
+    source: {kind: pdf, file: "2. 2026년 세제개편안 상세본.pdf", page: 72}
     certainty: bill_pending
     value: "0.15"
     payload:
       min_holding_years: 2
-      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.22 각주 *)"
+      relief_note_ko: "한시완화는 2년 이상 보유분에 한정(개조식 p.20 각주 *)"
     note: |
       ⚠️ 2026-08-04 감사에서 잡힌 전사 오류. 값이 0.20으로 들어가 있었고 note만 +15%p였다.
       정부 원문 2종이 일치한다:
-        개조식 p.22 <중과세율> 3주택자 행: +30%p / +10%p / **+15%p** / +30%p
-        상세본 p.85 "‘28.1.1.~’28.12.31. 중과세율 +15%p"
+        개조식 p.20 <중과세율> 3주택자 행: +30%p / +10%p / **+15%p** / +30%p
+        상세본 p.72 "‘28.1.1.~’28.12.31. 중과세율 +15%p"
       3주택 이상 케이스가 테스트에 없어 335개 테스트를 그대로 통과했다.
       골든 8값 회귀 테스트를 함께 넣었다(tests/test_transfer_tax.py).
 

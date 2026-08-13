@@ -872,13 +872,21 @@ def _exemption_eligible(
     min_hold = int(payload.get("min_holding_years", 2))
     min_live = int(payload.get("min_residence_years_if_regulated_at_acquisition", 2))
 
-    acquired = next(
-        (o.acquired_on for o in case.ownerships_of(event.person_id)
-         if o.property_id == event.property_id),
-        None,
-    )
-    zone_then = check_regulated(
-        prop.legal_dong_code, ruleset, on=acquired or on, track=track
+    # ⚠️ 2026-08-13 감사에서 잡힌 두 가지(세무 F6).
+    #
+    #   ① 예전에는 소유 이력의 **첫 행**을 집었다. 지분을 여러 번에 나눠 취득하면
+    #      (추가 매수·배우자 증여·공동상속 지분 매수) 행이 여러 개이고 순서는
+    #      보장되지 않는다. 보유기간 기산일(`periods.acquisition_date`)은 이미
+    #      **가장 이른 날**을 쓰는데 여기만 달랐다 — 같은 사건에서 두 날짜가 갈렸다.
+    #
+    #   ② 취득일이 없으면 `acquired or on`으로 **양도일**을 대신 썼다. 그건 다른
+    #      질문이다("취득 당시" vs "양도 당시"). 규제가 풀린 지역이면 답이 뒤집힌다.
+    #      모르면 모른다고 해야 한다 — 아래에서 판정 불가로 흘려보낸다.
+    acquired = periods.acquisition_date(case, event.person_id, event.property_id)
+    zone_then = (
+        check_regulated(prop.legal_dong_code, ruleset, on=acquired, track=track)
+        if acquired is not None
+        else None
     )
 
     held = event.holding_years
@@ -899,7 +907,7 @@ def _exemption_eligible(
     #   집처럼 지역 이력이 없는 사례가 전부 '판정 불가'로 막힌다 —
     #   답이 갈리지 않는 지점에서까지 판정 불가를 내는 것은 정직이 아니라 무능이다.
     residence_met = lived is not None and lived >= min_live
-    needs_residence = zone_then.designation is YES
+    needs_residence = zone_then is not None and zone_then.designation is YES
 
     # ★ 상생임대주택은 이 요건의 '제한'을 받지 않는다(시행령 §155의3①이 §154①을 지목).
     #   거주기간을 채운 것으로 **의제하는 것이 아니라**, 요건 자체가 걸리지 않는다.
@@ -918,6 +926,16 @@ def _exemption_eligible(
                 failures.append("거주기간 미상(취득 당시 조정대상지역)")
             else:
                 failures.append(f"거주 {lived}년 < {min_live}년 (취득 당시 조정대상지역)")
+        elif zone_then is None:
+            # 취득일을 몰라 '취득 당시' 지역을 물을 수조차 없다.
+            # 예전에는 양도일로 대신 물어 조용히 답을 만들어 냈다.
+            certainty = certainty & Certainty(
+                determination=DeterminationQuality.UNDECIDABLE
+            )
+            failures.append(
+                "취득일을 몰라 취득 당시 조정대상지역 여부를 판정할 수 없습니다 — "
+                f"조정대상지역이었다면 거주 {min_live}년이 필요합니다"
+            )
         elif zone_then.designation is UNKNOWN:
             # 거주요건을 못 채웠는데 지역도 모른다 — 여기서만 답이 갈린다.
             # 보수적으로(세액 높은 쪽) 비과세를 주지 않고, 갈린다는 사실을 남긴다.
@@ -962,8 +980,9 @@ def _exemption_eligible(
         certainty = certainty & Certainty(determination=DeterminationQuality.UNDECIDABLE)
 
     # 지역 판정의 확실성도 함께 물고 온다 — 취득 당시 지역이 미상이면
-    # 요건 판정 자체가 미상이다.
-    certainty = certainty & zone_then.certainty
+    # 요건 판정 자체가 미상이다. 취득일 자체를 모르면 지역을 물을 수도 없다.
+    if zone_then is not None:
+        certainty = certainty & zone_then.certainty
     value = Value.money(1 if ok else 0, certainty=certainty, label="비과세 요건 충족")
     alternatives: tuple[Alternative, ...] = ()
     if not ok:
@@ -1005,10 +1024,22 @@ def _exemption_eligible(
         ),
         substitution=(
             f"취득 {acquired or '미상'} · 보유 {held}년 · 거주 {lived}년 → "
-            + ("충족" if ok else " / ".join(failures))
+            # ⚠️ 상생임대 면제가 걸렸는데 "충족"이라고만 적으면, 거주 0년으로
+            #    요건을 **채운 것처럼** 읽힌다(2026-08-13 감사, 개발 F5).
+            #    채운 것과 면제받은 것은 다르고, 면제는 양도기한이 붙는다.
+            + (
+                "충족(거주요건은 상생임대주택 특례로 면제 — 시행령 §155의3①)"
+                if ok and sangsaeng_waives and (lived or 0) < min_live
+                else ("충족" if ok else " / ".join(failures))
+            )
         ),
         branch=BranchRecord(
-            condition_ko="비과세 요건", taken="충족" if ok else "미충족",
+            condition_ko="비과세 요건",
+            taken=(
+                "충족(거주요건 면제)"
+                if ok and sangsaeng_waives and (lived or 0) < min_live
+                else ("충족" if ok else "미충족")
+            ),
             detail_ko=(
                 "취득 당시 조정대상지역이라 거주요건이 추가됩니다"
                 if needs_residence
