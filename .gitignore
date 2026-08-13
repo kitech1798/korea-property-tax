@@ -1,7 +1,19 @@
 # 인증키는 절대 커밋하지 않는다. 환경변수로만 쓴다.
+#
+# ⚠️ 2026-08-13 감사 — 예전에는 `.env`와 `.streamlit/secrets.toml`을 **정확히 그 경로만**
+#    막았다. `.env.local`·`.env.production`·`config/secrets.toml`·`*.pem`은 전부 통과했다.
+#    실수는 대개 "비슷한 이름의 다른 파일"로 일어나므로 **꼴로 막는다.**
 .env
-.streamlit/secrets.toml
+.env.*
+!.env.example
+**/secrets.toml
+**/secrets.*.toml
 *.key
+*.pem
+*.p12
+*.pfx
+*credential*
+*.crt
 
 __pycache__/
 *.py[cod]

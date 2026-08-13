@@ -1,0 +1,70 @@
+#!/bin/sh
+# 푸시 전 비밀·개인정보 스캔. **게이트를 강제한다.**
+#
+# ⚠️ 2026-08-13 감사(보안 SEC-03) — `tools/deploy.ps1`에 게이트를 넣어 뒀지만
+#    `git push` 한 줄이면 통째로 우회됐다. 스크립트를 쓰는 것은 약속이지 강제가 아니다.
+#    실제로 이 저장소는 스크립트를 거치지 않은 푸시로 자택 IP를 공개한 적이 있다.
+#
+#    훅은 저장소에 커밋되지 않으므로(.git/hooks) 이 파일을 `hooks/`에 두고
+#    아래 한 줄로 연결한다. README에도 적혀 있다.
+#
+#        git config core.hooksPath hooks
+#
+# 테스트·룰셋·시뮬레이션까지 걸면 푸시가 1분 넘게 걸려 사람이 --no-verify를 쓰게 된다.
+# 그래서 훅은 **되돌릴 수 없는 것 하나**만 막는다 — 비밀 유출.
+# 나머지 게이트는 deploy.ps1이 맡는다.
+
+set -e
+
+REPO=$(git rev-parse --show-toplevel)
+NEEDLES="$REPO/tools/.secret-needles.txt"
+
+if [ ! -f "$NEEDLES" ]; then
+    echo "✗ 탐지 문자열 파일이 없습니다: tools/.secret-needles.txt" >&2
+    echo "  스캔을 건너뛰고 푸시하지 않습니다. 파일을 만들거나," >&2
+    echo "  정말 필요하면 --no-verify 로 우회하되 그 책임은 사람이 집니다." >&2
+    exit 1
+fi
+
+python - "$REPO" "$NEEDLES" <<'PY'
+import re, subprocess, sys, pathlib
+
+repo, needle_file = sys.argv[1], sys.argv[2]
+
+def flat(s: str) -> str:
+    # 영숫자만 남긴다 — 이스케이프·따옴표·+·공백이 끼어도 잡는다.
+    return re.sub(r"[^0-9A-Za-z]", "", s)
+
+needles = []
+for line in pathlib.Path(needle_file).read_text(encoding="utf-8").splitlines():
+    line = line.strip()
+    if line and not line.startswith("#"):
+        f = flat(line)
+        if f:
+            needles.append(f)
+
+def git(*a):
+    return subprocess.run(["git", "-C", repo, *a], capture_output=True).stdout
+
+objs = git("rev-list", "--objects", "--all").decode("utf-8", "replace").split("\n")
+leaks = []
+for row in objs:
+    sha = row.split(" ", 1)[0]
+    if len(sha) != 40:
+        continue
+    if git("cat-file", "-t", sha).strip() != b"blob":
+        continue
+    body = git("cat-file", "-p", sha).decode("utf-8", "replace")
+    fb = flat(body)
+    for n in needles:
+        if n in fb:
+            leaks.append(f"{sha[:10]} : {n[:4]}…")
+
+if leaks:
+    print("✗ 비밀·개인정보가 이력에 있습니다. 푸시를 막습니다.", file=sys.stderr)
+    for l in leaks[:10]:
+        print("   " + l, file=sys.stderr)
+    print("  git filter-repo --replace-text 로 이력에서 지우세요.", file=sys.stderr)
+    sys.exit(1)
+print("  pre-push 비밀 스캔: 깨끗함")
+PY

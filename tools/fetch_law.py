@@ -95,20 +95,35 @@ class LawApiError(RuntimeError):
     pass
 
 
+def _safe_url(url: str, params: Mapping[str, Any]) -> str:
+    """오류 메시지에 쓸 URL. **OC(개인 계정 ID)를 가린다.**
+
+    ⚠️ 2026-08-13 감사에서 잡힌 유출 경로. 이 함수가 없으면 실패한 조회의 오류
+       메시지가 `fetch_law()`에서 스냅샷 JSON에 그대로 저장되고(221행),
+       그 JSON은 **git이 추적한다**. 조회가 한 번만 실패해도 개인 계정 ID가
+       공개 저장소 이력에 영구히 남는다.
+
+       인증값은 화면에도 로그에도 파일에도 남기지 않는다 — 셋 다 새는 통로다.
+    """
+    oc = str(params.get("OC", "") or "")
+    return url.replace(f"OC={urllib.parse.quote(oc)}", "OC=***") if oc else url
+
+
 def _get(path: str, params: dict[str, Any]) -> Any:
     url = f"{BASE}/{path}?" + urllib.parse.urlencode(params, encoding="utf-8")
+    shown = _safe_url(url, params)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
     except Exception as exc:  # 네트워크는 항상 실패할 수 있다. 조용히 넘기지 않는다.
-        raise LawApiError(f"호출 실패: {url}\n  {exc}") from exc
+        raise LawApiError(f"호출 실패: {shown}\n  {exc}") from exc
 
     stripped = raw.lstrip()
     if not stripped.startswith(("{", "[")):
         # 인증 실패·차단 시 HTML 안내문이 온다. JSON 파싱 오류로 위장되면 원인을 못 찾는다.
         raise LawApiError(
-            f"JSON이 아닌 응답이 왔다(인증·차단 의심): {url}\n  앞부분: {stripped[:200]}"
+            f"JSON이 아닌 응답이 왔다(인증·차단 의심): {shown}\n  앞부분: {stripped[:200]}"
         )
     return json.loads(raw)
 
@@ -218,7 +233,10 @@ def fetch_law(spec: LawSpec, oc: str, verbose: bool = True) -> dict[str, Any]:
             try:
                 doc = fetch_article(mst, eff, jo_code(article), oc)
             except LawApiError as exc:
-                entry["articles"][article] = {"error": str(exc)}
+                # 이 값은 git이 추적하는 JSON에 저장된다(save 참조).
+                # `_safe_url`이 OC를 가려 두지만, 여기서 한 번 더 끊는다 —
+                # 유출 경로는 한 겹으로 막지 않는다.
+                entry["articles"][article] = {"error": _safe_url(str(exc), {"OC": oc})}
                 if verbose:
                     print(f"      제{article}조 ✗ {exc}")
                 continue

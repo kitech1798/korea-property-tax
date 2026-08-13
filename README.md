@@ -269,6 +269,25 @@ python tools/verify_hub.py --dong 1168010700 --bun 680  # ★ 공시가격 실�
 
 ## 배포
 
+### 먼저 — 훅을 연결한다 (한 번만)
+
+```bash
+git config core.hooksPath hooks
+```
+
+`hooks/pre-push`가 **푸시 직전에 이력 전체를 비밀 스캔**한다. 이게 없으면
+`tools/deploy.ps1`의 게이트를 `git push` 한 줄로 우회할 수 있다 —
+이 저장소는 실제로 그렇게 자택 IP를 공개한 적이 있다(2026-08-13, 이력 세탁 완료).
+
+훅은 **되돌릴 수 없는 것 하나**(비밀 유출)만 막는다. 테스트·룰셋·시뮬레이션까지
+걸면 푸시가 1분 넘게 걸려 사람이 `--no-verify`를 쓰게 되고, 그러면 훅이 없는 것과 같다.
+나머지 게이트는 `tools/deploy.ps1`이 맡는다.
+
+탐지 문자열은 `tools/.secret-needles.txt`(gitignore 대상)에 한 줄에 하나씩 적는다.
+**파일이 없으면 푸시를 멈춘다** — 스캔을 조용히 건너뛰는 것이 가장 나쁜 실패다.
+
+### 플랫폼
+
 앱 코드는 두 플랫폼에서 동일하다. 차이는 설정 몇 줄뿐이다.
 
 **Streamlit Community Cloud** (권장)
