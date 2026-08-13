@@ -1,32 +1,34 @@
-﻿# 배포 — 이 폴더만 공개 저장소로 밀어 올린다.
+﻿# 배포 — 이 저장소를 공개 저장소(main)로 밀어 올린다.
 #
-# 왜 그냥 push가 아닌가
-#     이 프로젝트는 개인 모노레포(`교육`) 안에 있다. 그냥 밀면 블로그·공모전·책 원고까지
-#     전부 공개된다. 그래서 **이 폴더의 트리만** 떼어 별도 저장소의 main에 얹는다.
+# 2026-08-13 전면 개정. 이전 판은 개인 모노레포(`교육`) 안에서 이 폴더의 트리만
+# 떼어 합성 커밋으로 올렸다. 저장소가 분리되면서 그 우회로가 필요 없어졌다.
 #
-# 안전장치 두 겹
-#     ① remote.property-tax.push 를 refspec으로 못 박아 두었다(git config).
-#        인자 없이 `git push property-tax` 를 해도 모노레포가 나가지 않는다.
-#     ② 이 스크립트는 푸시 전에 인증키·자택 IP를 스캔하고, 걸리면 멈춘다.
+# ⚠️ 이 파일을 고치게 만든 사고 (2026-08-13)
+#     `_RESUME.md`에 juso 키 발급 기준으로 자택 IP를 메모해 두었는데, 그 커밋이
+#     공개 저장소로 나갔다. 나중에 파일에서 지웠지만 **과거 커밋에는 그대로 남았다.**
+#     이전 스캐너가 못 잡은 이유가 두 가지다.
+#       ① `git rev-parse "HEAD:$Prefix"` — **현재 트리만** 봤다. 과거는 범위 밖이었다.
+#       ② 패턴이 정규식이라 `[REDACTED-IP]` 처럼 **이스케이프된 형태**를 못 잡았다.
+#          사람 눈에는 그대로 읽히는 IP인데 스캐너만 못 봤다.
+#     그래서 지금은 **이력 전체**를 훑고, 구분자를 지운 **정규화 문자열**로 찾는다.
 #
 # 실행
 #     pwsh -File tools/deploy.ps1              # 검사 후 푸시
 #     pwsh -File tools/deploy.ps1 -DryRun      # 검사만
 
 param(
-    [switch]$DryRun,
-    [string]$Message = "chore: 배포 갱신"
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
-$Repo = "c:\Users\admin\Desktop\교육"
-$Prefix = "부동산 상담"
-$Remote = "property-tax"
+$Repo = Split-Path -Parent $PSScriptRoot
+$Remote = "origin"
+$Branch = "main"
 
 Set-Location $Repo
 
 # ── 0. 커밋되지 않은 변경이 있으면 멈춘다 ──────────────────────────
-$dirty = git status --porcelain -- $Prefix
+$dirty = git status --porcelain
 if ($dirty) {
     Write-Host "커밋되지 않은 변경이 있습니다. 먼저 커밋하세요:" -ForegroundColor Yellow
     $dirty | Select-Object -First 10
@@ -34,69 +36,71 @@ if ($dirty) {
 }
 
 # ── 1. 테스트 게이트 ───────────────────────────────────────────────
-Push-Location (Join-Path $Repo $Prefix)
 $test = python -m pytest tests/ -q --tb=no 2>&1 | Select-String "passed"
 $lint = python -m realestate_tax.rules.lint 2>&1 | Select-String "이상 없음"
 # 상황 시뮬레이션도 게이트에 건다. 하네스는 **자동으로 돌지 않으면 아무 의미가 없다** —
 # 손으로 돌리는 검증은 바쁠 때 가장 먼저 생략되고, 바쁠 때가 사고가 나는 때다.
 $sim = python -m sim.run --fail-on-violation 2>&1 | Select-String "^시나리오"
 $simOk = $LASTEXITCODE -eq 0
-Pop-Location
 if (-not $test -or -not $lint) {
     Write-Host "테스트 또는 룰셋 린트가 통과하지 않았습니다. 배포를 중단합니다." -ForegroundColor Red
     exit 1
 }
 if (-not $simOk) {
     Write-Host "상황 시뮬레이션에서 불변식 위반이 있습니다. 배포를 중단합니다." -ForegroundColor Red
-    Write-Host "  자세히 보기: python -m sim.run" -ForegroundColor Yellow
     exit 1
 }
 Write-Host "  테스트: $($test.Line.Trim())"
 Write-Host "  룰셋:   통과"
 Write-Host "  시뮬:   $($sim.Line.Trim())"
 
-# ── 2. 비밀·개인정보 스캔 ──────────────────────────────────────────
-# 인증키는 환경변수로만 쓰지만, 실수로 붙여넣은 흔적을 매번 확인한다.
-# 자택 IP도 공개 저장소에 두지 않는다.
-$tree = git rev-parse "HEAD:$Prefix"
-
-# ⚠️ 패턴을 리터럴로 적으면 **이 파일이 스스로 걸린다**(첫 실행에서 실제로 걸렸다).
-#    스캔에서 이 파일을 제외하면 정작 여기 붙여넣은 키를 놓치므로,
-#    제외하는 대신 조각을 이어 붙여 리터럴이 파일에 남지 않게 한다.
-$patterns = @(
-    ("U01T" + "[REDACTED-KEY]"),      # juso 승인키 접두
-    ("5f31e" + "[REDACTED-KEY]"),     # data.go.kr 인증키 접두
-    ("[REDACTED-IP]" + "[REDACTED-IP]"), # 발급 당시 자택 IP
-    ("dune" + "[REDACTED-ACCOUNT]")         # 개인 계정
+# ── 2. 비밀·개인정보 스캔 (이력 전체) ──────────────────────────────
+# 공개 저장소는 **현재 파일이 아니라 이력 전체**가 공개된다. 지운 것도 과거에 남는다.
+#
+# ⚠️ 패턴을 리터럴로 적으면 이 파일이 스스로 걸린다(첫 실행에서 실제로 걸렸다).
+#    제외하면 정작 여기 붙여넣은 키를 놓치므로, 조각을 이어 붙여 리터럴을 남기지 않는다.
+$needles = @(
+    ("U01T" + "[REDACTED-KEY]"),   # juso 승인키 접두
+    ("5f31e" + "[REDACTED-KEY]"),  # data.go.kr 인증키 접두
+    ("119" + "[REDACTED-IP]"), # 발급 당시 자택 IP
+    ("dune" + "[REDACTED-ACCOUNT]"),     # 개인 계정
+    ("wonjun" + "[REDACTED-EMAIL]")  # 정부 보도자료 담당자 메일
 )
-foreach ($p in $patterns) {
-    $hit = git grep -n -E $p $tree 2>$null
-    if ($hit) {
-        Write-Host "비밀·개인정보로 보이는 문자열이 있습니다 ($p). 배포를 중단합니다." -ForegroundColor Red
-        $hit | Select-Object -First 5
-        exit 1
+
+$revs = git rev-list --all
+Write-Host "  비밀 스캔: 커밋 $($revs.Count)개 · 이력 전체"
+$blobs = git rev-list --objects --all | ForEach-Object { ($_ -split " ", 2)[0] } | Select-Object -Unique
+
+$leaks = @()
+foreach ($b in $blobs) {
+    if ((git cat-file -t $b 2>$null) -ne "blob") { continue }
+    $raw = git cat-file -p $b 2>$null
+    if (-not $raw) { continue }
+    # ★ 정규화 — 정규식 이스케이프(`\.`)·공백·따옴표를 지우고 비교한다.
+    #   이 한 줄이 없어서 `[REDACTED-IP]` 을 놓쳤다.
+    $flat = ($raw -join "`n") -replace '\\', '' -replace '\s', ''
+    foreach ($n in $needles) {
+        if ($flat.Contains(($n -replace '\s', ''))) { $leaks += "$b : $n" }
     }
+}
+if ($leaks) {
+    Write-Host "비밀·개인정보가 이력에 있습니다. 배포를 중단합니다." -ForegroundColor Red
+    $leaks | Select-Object -First 10
+    Write-Host "  이력에서 지우려면 git filter-repo --replace-text 를 쓰세요." -ForegroundColor Yellow
+    exit 1
 }
 Write-Host "  비밀 스캔: 깨끗함"
 
 if ($DryRun) { Write-Host "DryRun — 푸시하지 않습니다."; exit 0 }
 
-# ── 3. 트리만 얹어 커밋 → 푸시 ─────────────────────────────────────
-# git subtree split은 모노레포 전 이력을 재탐색해 몇 분씩 걸린다.
-# 필요한 것은 '현재 상태' 하나이므로 직전 배포 커밋 위에 트리를 얹는다.
-$parent = (git ls-remote $Remote main 2>$null) -split "\s+" | Select-Object -First 1
-$commit = if ($parent) {
-    git commit-tree $tree -p $parent -m $Message
-} else {
-    git commit-tree $tree -m $Message
-}
+# ── 3. 푸시 ────────────────────────────────────────────────────────
 # ⚠️ git은 정상 진행 상황도 stderr에 쓴다("To https://…"). 스크립트 맨 위의
 #    $ErrorActionPreference = "Stop"과 만나면 **성공한 푸시가 실패로 읽힌다.**
 #    실제로 2026-08-05에 그렇게 멈췄고, 원격은 멀쩡히 갱신돼 있었다.
 #    네이티브 명령의 성공 여부는 stderr가 아니라 **종료코드**로만 판단한다.
 $prev = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-git push $Remote "${commit}:refs/heads/main"
+git push $Remote $Branch
 $pushed = $LASTEXITCODE -eq 0
 $ErrorActionPreference = $prev
 if (-not $pushed) {
@@ -105,12 +109,11 @@ if (-not $pushed) {
 }
 
 # 원격이 정말 이 커밋을 가리키는지 확인한다. "푸시했다"와 "반영됐다"는 다르다.
-$remoteHead = (git ls-remote $Remote main) -split "\s+" | Select-Object -First 1
-if ($remoteHead -ne $commit) {
-    Write-Host "원격 main이 $remoteHead 로 다릅니다. 배포를 확인하세요." -ForegroundColor Red
+$local = git rev-parse HEAD
+$remoteHead = (git ls-remote $Remote $Branch) -split "\s+" | Select-Object -First 1
+if ($remoteHead -ne $local) {
+    Write-Host "원격이 $remoteHead 로 다릅니다. 배포를 확인하세요." -ForegroundColor Red
     exit 1
 }
-
-Write-Host ""
-Write-Host "배포 완료 → https://github.com/kitech1798/korea-property-tax" -ForegroundColor Green
-Write-Host "Streamlit Cloud가 main 변경을 감지해 자동으로 다시 배포합니다."
+Write-Host "배포 완료 — $local" -ForegroundColor Green
+Write-Host "  https://korea-property-tax.streamlit.app/ 는 몇 분 뒤 갱신됩니다."
