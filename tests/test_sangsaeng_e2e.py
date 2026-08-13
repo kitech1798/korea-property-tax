@@ -272,6 +272,25 @@ def test_계약금_증빙을_모르면_비과세를_주지_않는다(rs: RuleSet
     assert r.trace.find("tr.03a.sangsaeng").branch.taken == "판정 불가"
 
 
+def test_요건에_걸려_탈락해도_이유와_고칠_곳을_말한다(rs: RuleSet):
+    """★ 2026-08-13 감사(이용자 관점) — 탈락하면 화면이 아무 말도 하지 않았다.
+
+    적용·판정불가일 때만 노드를 남겨서, 임대차를 열심히 입력한 사용자가
+    왜 안 되는지도 무엇을 고쳐야 하는지도 알 수 없었다.
+    """
+    short = LeaseSpell(
+        property_id=HOUSE, start=date(2025, 2, 1), end=date(2026, 12, 31),  # 23개월
+        deposit=520_000_000, contracted_on=date(2024, 12, 15),
+        down_payment_evidenced=True,
+    )
+    r = run(rs, make_case(PRIOR, short), date(2027, 6, 1))
+    node = r.trace.find("tr.03a.sangsaeng")
+    assert node is not None, "탈락했다고 노드를 통째로 지웠다"
+    assert node.output.amount is False
+    assert "23개월" in node.substitution, "무엇이 모자란지 말하지 않는다"
+    assert "다섯 가지를 모두" in node.substitution, "어디를 고쳐야 하는지 말하지 않는다"
+
+
 def test_승계받은_계약뿐이면_비과세를_주지_않는다(rs: RuleSet):
     """§155의3①1호 괄호 — 세입자가 살던 집을 사서 물려받은 계약은
     직전임대차계약이 될 수 없다."""

@@ -141,6 +141,33 @@ def test_갱신요구권을_이미_썼으면_위험이_없다(rs: RuleSet):
     assert not [c for c in w.constraints if c.kind is ConstraintKind.RISK]
 
 
+def test_임차인이_바뀌면_갱신요구권_경고가_남는다(rs: RuleSet):
+    """★ 2026-08-13 감사(이용자 관점).
+
+    §6의3②의 갱신요구권은 **임차인마다** 1회다. 앞 계약의 임차인이 요구권을 썼어도
+    사람이 바뀌었으면 새 임차인에게는 권리가 그대로 있다.
+
+    예전 화면은 임차인 별칭 칸이 **하나뿐**이라 "두 계약의 임차인이 다르다"고 답할
+    방법이 없었고, 그 결과 경고가 통째로 사라졌다.
+    """
+    old_tenant_used = LeaseSpell(
+        property_id=HOUSE, start=date(2023, 2, 1), end=date(2025, 1, 31),
+        deposit=5 * EOK, contracted_on=date(2022, 12, 10),
+        down_payment_evidenced=True, tenant_ref="임차인A",
+        origin=LeaseOrigin.TENANT_RENEWAL_RIGHT,
+    )
+    new_tenant = LeaseSpell(
+        property_id=HOUSE, start=date(2025, 2, 1), end=date(2027, 1, 31),
+        deposit=520_000_000, contracted_on=date(2024, 12, 15),
+        down_payment_evidenced=True, tenant_ref="임차인B",
+    )
+    w = optimize(make_case(old_tenant_used, new_tenant), EVENT, rs,
+                 start=date(2026, 8, 13), end=date(2028, 12, 31))
+    assert [c for c in w.constraints if c.kind is ConstraintKind.RISK], (
+        "임차인이 바뀌었는데 갱신요구권 경고가 사라졌다"
+    )
+
+
 def test_임차인을_구분할_수_없으면_위험을_지우지_않는다(rs: RuleSet):
     """별칭이 없으면 같은 임차인인지 알 수 없다. 모르는 것을 소진으로 처리하면
     위험이 사라진 것처럼 보인다."""

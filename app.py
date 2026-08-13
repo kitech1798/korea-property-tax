@@ -296,7 +296,7 @@ with tab_input:
             #    임대차는 주택마다 고유한 사실이므로 복사 대상이 아니다.
             _fresh = {
                 k: v for k, v in st.session_state.houses[0].items()
-                if not (k == "leased" or k.startswith(("prior_", "sang_")) or k == "tenant_ref")
+                if not (k == "leased" or k.startswith(("prior_", "sang_")))
             }
             _fresh["leased"] = False
             st.session_state.houses.append(dict(_fresh, name=f"주택{len(st.session_state.houses) + 1}"))
@@ -494,6 +494,18 @@ with tab_input:
                         "(§155의3①1호 괄호). 상생임대 판정에서 가장 흔한 함정입니다. "
                         "갱신요구권 행사 이력은 다음 만기에 세입자를 내보낼 수 있는지를 가릅니다.",
                     )
+                    # ⚠️ 예전에는 임차인 별칭이 **한 칸뿐**이라 두 계약의 임차인이
+                    #    다르다고 답할 방법이 없었다(2026-08-13 감사). 그래서 앞 계약에
+                    #    '갱신요구권 행사'를 고르면 사람이 바뀌었어도 권리가 소진된 것으로
+                    #    읽혀 **경고가 통째로 사라졌다.** 계약마다 받는다.
+                    h[f"{slot}_tenant"] = st.text_input(
+                        "임차인 구분(별칭)",
+                        h.get(f"{slot}_tenant", h.get("tenant_ref", "임차인A")),
+                        key=f"{slot}tn{i}",
+                        help="갱신요구권은 **임차인마다 1회**입니다(§6의3②). 두 계약의 "
+                        "임차인이 같은 사람인지 알아야 소진 여부를 판정할 수 있습니다. "
+                        "개인정보를 남기지 않도록 이름 대신 별칭을 쓰세요.",
+                    )
                     if slot == "sang":
                         _ek = list(_EVIDENCED)
                         h["sang_evidenced"] = st.selectbox(
@@ -503,10 +515,9 @@ with tab_input:
                             help="§155의3①1호가 요건으로 정합니다. "
                             "**모르면 유리하게 가정하지 않습니다** — 확인 전에는 특례를 적용하지 않습니다.",
                         )
-                h["tenant_ref"] = st.text_input(
-                    "임차인 구분(별칭)", h.get("tenant_ref", "임차인A"), key=f"tn{i}",
-                    help="갱신요구권은 **임차인마다 1회**입니다. 두 계약의 임차인이 같은 사람인지 "
-                    "알아야 소진 여부를 판정할 수 있습니다. 이름 대신 별칭을 쓰세요.",
+                st.caption(
+                    "임차인이 바뀌면 갱신요구권도 새로 생깁니다(§6의3② — 임차인마다 1회). "
+                    "두 계약의 임차인이 다르면 아래 별칭을 서로 다르게 적어주세요."
                 )
 
             zone = check_regulated(h["dong"], rs, on=date(year, 6, 1), track=effective_track)
@@ -638,7 +649,7 @@ def build_case(target_year: int) -> TaxCase:
                             if slot == "sang"
                             else None
                         ),
-                        tenant_ref=h.get("tenant_ref", ""),
+                        tenant_ref=h.get(f"{slot}_tenant", ""),
                     )
                 )
 
@@ -897,7 +908,12 @@ with tab_sell:
                         f"매도일 {_renewed.best.on}로 밀림" if _renewed.best else "",
                         False,
                     ),
-                    ("통지를 놓친 비용", format_manwon(_loss), "두 시나리오의 차이", _loss > 0),
+                    # ⚠️ 예전 이름은 '통지를 놓친 비용'이었다. 그러면 "통지만 제때
+                    #    하면 안전하다"는 **반대의 오해**를 만든다(2026-08-13 감사).
+                    #    갱신은 통지 실패로도 오지만 임차인의 갱신요구권 행사로도 온다.
+                    #    §6의3①이 "제6조에도 불구하고"로 시작하므로 통지만으로는 막지 못한다.
+                    ("갱신되면 더 내는 세금", format_manwon(_loss),
+                     "통지 실패 또는 임차인의 갱신요구", _loss > 0),
                 ]
             )
 

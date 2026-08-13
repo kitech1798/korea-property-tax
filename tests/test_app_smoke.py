@@ -129,7 +129,9 @@ def _leased(**over) -> dict:
         "sang_contracted": date(2024, 12, 15),
         "sang_deposit": 5.2, "sang_rent": 0, "sang_origin": "새로 체결",
         "sang_evidenced": "예",
-        "tenant_ref": "임차인A",
+        # 임차인 별칭은 계약마다 받는다 — 사람이 바뀌면 갱신요구권도 새로 생긴다.
+        "prior_tenant": "임차인A",
+        "sang_tenant": "임차인A",
     }
     fields.update(over)
     return _house(**fields)
@@ -165,6 +167,7 @@ def test_매도시점_화면이_실제로_그려진다():
         {"prior_end": date(2026, 1, 31)},                # 기간 겹침 → 판정 불가
         {"sang_rent": 60},                               # 전세→월세 전환
         {"sang_origin": "임차인이 갱신요구권 행사"},      # 요구권 소진
+        {"prior_tenant": "임차인A", "sang_tenant": "임차인B"},  # 임차인이 바뀐 경우
     ],
 )
 def test_임대차_변형들도_화면이_버틴다(over):

@@ -466,7 +466,11 @@ def compute_transfer_tax(
     # 비과세와 장특공제 두 곳에서 쓰이므로 여기서 한 번만 판정한다.
     sang = sangsaeng_assess(case, event.property_id, ruleset, on, track)
     sang_waives = waives_residence(sang, on)
-    if sang.applies or sang.undecidable:
+    # ⚠️ 예전에는 적용·판정불가일 때만 노드를 남겨서, **요건에 걸려 탈락하면 화면이
+    #    아무 말도 하지 않았다**(2026-08-13 감사, 이용자 관점). 임대차를 입력한
+    #    사용자는 왜 안 되는지도, 무엇을 고쳐야 하는지도 알 수 없었다.
+    #    임대차를 적었다면 결과가 무엇이든 이유를 보여준다.
+    if case.leases_of(event.property_id):
         children.append(_sangsaeng_node(sang, sang_waives, on))
 
     eligible, req_node = _exemption_eligible(
@@ -814,6 +818,15 @@ def _sangsaeng_node(v: SangsaengVerdict, waives: bool, on: date) -> TraceNode:
             "면제되는 것은 거주기간의 '제한'입니다. 거주기간을 2년으로 쳐주는 것이 "
             "아니므로, 장기보유특별공제의 거주기간 공제율은 실제 거주기간으로 "
             "계산합니다(실거주 0년이면 거주공제 0%)."
+        )
+    elif not v.applies and not v.undecidable:
+        # 탈락했으면 **무엇을 고치면 되는지**까지 말한다. 요건이 다섯이라
+        # "안 됩니다"만 들으면 사용자는 어디를 손봐야 할지 알 수 없다.
+        lines.append(
+            "상생임대주택 요건은 ①직전임대차 1년 6개월 이상 ②상생임대차 2년 이상 "
+            "③보증금·월세 인상률 5% 이내 ④'21.12.20.~'26.12.31. 중 계약체결과 임대개시 "
+            "⑤계약금 지급 증빙 — 다섯 가지를 모두 갖춰야 합니다. "
+            "위에 적힌 사유가 걸린 부분입니다."
         )
 
     return node(
