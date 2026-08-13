@@ -107,6 +107,135 @@ EXPOS_SAMPLE = [
 ]
 
 
+# --------------------------------------------------------------------------
+# 오류 분류 — "무엇이 잘못됐나"를 틀리게 말하면 사용자가 엉뚱한 일을 한다
+# --------------------------------------------------------------------------
+
+
+def test_빈_응답은_키_문제가_아니라_일시적_장애다():
+    """★ 2026-08-13 실측.
+
+    같은 시각에 한 오퍼레이션은 HTTP 200에 **본문 0자**, 다른 하나는 503,
+    또 다른 하나는 정상 JSON을 돌려줬다. 포털 과부하의 전형이다.
+
+    예전 코드는 이걸 "인증키 미승인·한도초과 의심"이라고 말했다. 키는 멀쩡한데
+    사용자를 발급 페이지로 보내는 문구였다. 실제로 화면에 그렇게 떴다.
+    """
+    err = hub._classify_non_json("", "getBrExposPubuseAreaInfo")
+    assert isinstance(err, hub.TransientUnavailable)
+    assert "인증키와는 무관" in str(err)
+    assert "미승인" not in str(err)
+
+
+def test_포털이_보낸_오류_사유를_그대로_보여준다():
+    """XML 오류문서에는 **진짜 사유**가 적혀 있다. 요약하지 말고 옮긴다."""
+    xml = (
+        '<?xml version="1.0"?><OpenAPI_ServiceResponse><cmmMsgHeader>'
+        "<returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg>"
+        "<returnReasonCode>30</returnReasonCode>"
+        "</cmmMsgHeader></OpenAPI_ServiceResponse>"
+    )
+    err = hub._classify_non_json(xml, "getBrTitleInfo")
+    assert not isinstance(err, hub.TransientUnavailable)
+    assert "SERVICE_KEY_IS_NOT_REGISTERED_ERROR" in str(err)
+    assert "returnReasonCode=30" in str(err)
+
+
+def test_한도초과도_사유_그대로_전달한다():
+    xml = (
+        "<response><resultCode>22</resultCode>"
+        "<resultMsg>LIMITED NUMBER OF SERVICE REQUESTS EXCEEDS ERROR</resultMsg></response>"
+    )
+    err = hub._classify_non_json(xml, "getBrTitleInfo")
+    assert "LIMITED NUMBER OF SERVICE REQUESTS EXCEEDS ERROR" in str(err)
+
+
+def test_모르는_형식이면_앞부분을_보여준다():
+    """점검 안내 HTML 등. 지어내지 말고 받은 것을 보여준다."""
+    err = hub._classify_non_json("<html><body>점검 중입니다</body></html>", "getBrTitleInfo")
+    assert "앞부분" in str(err)
+    assert "점검 중입니다" in str(err)
+
+
+# --------------------------------------------------------------------------
+# 빈 200 응답 재시도 — 포털이 4번에 1번꼴로 빈손으로 온다
+# --------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, body: str):
+        self._body = body.encode("utf-8")
+        self.status = 200
+        self.headers = {}
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _fake_urlopen(bodies):
+    """호출될 때마다 `bodies`를 차례로 돌려준다. 다 쓰면 마지막 것을 반복한다."""
+    seq = list(bodies)
+    calls = {"n": 0}
+
+    def opener(req, timeout=None):
+        i = min(calls["n"], len(seq) - 1)
+        calls["n"] += 1
+        return _FakeResponse(seq[i])
+
+    opener.calls = calls
+    return opener
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    monkeypatch.setattr(hub.time, "sleep", lambda *_: None)
+
+
+def test_빈_응답이_와도_다시_쳐서_성공한다(monkeypatch, no_sleep):
+    """★ 2026-08-13 실측 — 같은 호출이 4번에 1번꼴로 빈 본문을 돌려준다.
+
+    한 번 실패했다고 포기하면 호 목록 조회가 통째로 무너진다. 한 단지가 수십
+    페이지라 페이지 하나만 실패해도 전체가 실패하기 때문이다.
+    """
+    opener = _fake_urlopen(["", "", "", '{"response":{"ok":1}}'])
+    monkeypatch.setattr(hub.urllib.request, "urlopen", opener)
+    got = hub._get_with_retry("https://example.test/x", "getBrTitleInfo")
+    assert got == '{"response":{"ok":1}}'
+    assert opener.calls["n"] == 4
+
+
+def test_계속_비어_있으면_일시적_장애로_보고한다(monkeypatch, no_sleep):
+    """키 문제로 오진하지 않는다. 사용자가 할 일은 '기다리기'다."""
+    monkeypatch.setattr(hub.urllib.request, "urlopen", _fake_urlopen([""]))
+    with pytest.raises(hub.TransientUnavailable) as e:
+        hub._get_with_retry("https://example.test/x", "getBrTitleInfo")
+    assert "인증키와는 무관" in str(e.value)
+
+
+def test_일시적_장애가_일반_오류로_둔갑하지_않는다(monkeypatch, no_sleep):
+    """`try` 안에서 던진 예외를 아래 `except Exception`이 도로 잡으면
+    원인 구분이 무너진다. 실제로 그렇게 짰다가 잡았다."""
+    monkeypatch.setattr(hub.urllib.request, "urlopen", _fake_urlopen([""]))
+    with pytest.raises(hub.BuildingHubError) as e:
+        hub._get_with_retry("https://example.test/x", "getBrTitleInfo")
+    assert type(e.value) is hub.TransientUnavailable
+
+
+def test_빈_응답은_5xx_재시도_예산을_쓰지_않는다(monkeypatch, no_sleep):
+    """둘은 성격이 다른 실패다. 한 예산으로 묶으면 빈 응답 몇 번에 5xx 여력이 사라진다."""
+    bodies = [""] * (hub._MAX_ATTEMPTS + 1) + ['{"ok":1}']
+    opener = _fake_urlopen(bodies)
+    monkeypatch.setattr(hub.urllib.request, "urlopen", opener)
+    assert hub._get_with_retry("https://example.test/x", "getBrTitleInfo") == '{"ok":1}'
+    assert opener.calls["n"] == len(bodies)
+
+
 def test_공용부는_호_목록에서_제외한다():
     """걸러내지 않으면 호 선택 드롭다운에 계단실·기계실이 섞여 나온다."""
     units = parse_units(EXPOS_SAMPLE)

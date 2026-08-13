@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -310,12 +311,36 @@ class RateLimited(BuildingHubError):
     """API가 429로 물러서라고 했다. 재시도해도 안 되면 여기까지 온다."""
 
 
+class TransientUnavailable(BuildingHubError):
+    """포털이 일시적으로 응답하지 못한다 — **키·한도 문제와 구분한다.**
+
+    빈 200 응답이나 503이 여기 해당한다. 사용자가 할 일은 '기다리기'이지
+    '키 재발급'이 아니다. 이 구분이 없으면 멀쩡한 키를 다시 받으러 가게 된다."""
+
+
 # 이 API는 **속도 제한이 있다**(HTTP 429). 2026-08-05에 실측 중 실제로 걸렸고,
 # 그 뒤 한동안 정상 조회까지 막혔다. 그래서 두 가지를 함께 건다:
 #   ① 429·5xx에는 물러섰다 다시(exponential backoff + Retry-After 존중)
 #   ② 연속 호출 사이에 최소 간격 — 재시도만 있으면 한도를 계속 두드린다
 _MIN_INTERVAL_SEC = 0.06
 _MAX_ATTEMPTS = 5
+
+# ★ 빈 200 응답은 **다른 종류의 실패**다 (2026-08-13 실측).
+#
+#   같은 URL을 6번 불러 6번 다 성공했고, 캐시 우회 파라미터를 바꿔 6번 부르니
+#   2번이 빈 응답이었다. 즉 URL·파라미터·페이지크기와 무관한 **무작위**이고,
+#   응답 헤더도 `Cache-Control: no-cache, no-store`라 캐시 문제가 아니다.
+#   실패율은 대략 4번에 1번.
+#
+#   429·5xx는 서버가 "물러서라"고 말하는 것이라 지수 백오프가 맞다. 그러나 빈 200은
+#   서버가 아무 말도 안 한 것이고 즉시 돌아온다. 여기서 6.4초씩 기다리는 것은
+#   손해만 크다. **짧게, 여러 번** 다시 친다.
+#
+#   호 목록은 한 단지가 수십 페이지라, 페이지 하나가 재시도를 소진하면 조회 전체가
+#   무너진다. 25% 실패율에서 5회 재시도면 페이지당 0.1%지만 30페이지면 3%다.
+#   8회로 올리면 페이지당 0.0015%, 30페이지에서도 0.05%다.
+_MAX_EMPTY_RETRIES = 8
+_EMPTY_RETRY_DELAY = 0.3
 _last_call_at = 0.0
 _throttle_lock = threading.Lock()
 
@@ -331,16 +356,43 @@ def _pace() -> None:
 
 
 def _get_with_retry(url: str, operation: str) -> str:
+    """두 종류의 실패를 **다르게** 다룬다.
+
+      429·5xx  — 서버가 물러서라고 말한 것. 지수 백오프 + Retry-After 존중.
+      빈 200   — 서버가 아무 말 없이 빈손으로 온 것. 짧게 여러 번 다시 친다.
+
+    한 예산으로 묶으면 둘 다 못 지킨다. 빈 응답에 6.4초를 기다리는 것도,
+    429에 0.3초 만에 다시 두드리는 것도 틀렸다.
+    """
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     delay = 0.8
-    for attempt in range(1, _MAX_ATTEMPTS + 1):
+    attempt = 0
+    empty_seen = 0
+    while True:
+        attempt += 1
         _pace()
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-                return resp.read().decode("utf-8", errors="replace")
+                body = resp.read().decode("utf-8", errors="replace")
+            # ★ HTTP 200인데 **본문이 비어 있는** 응답이 4번에 1번꼴로 온다.
+            #   예전에는 이걸 그대로 넘겨서 상위가 "인증키 미승인·한도초과 의심"이라고
+            #   **오진**했다. 키는 멀쩡한데 사용자를 발급 페이지로 보내는 셈이었다.
+            if body.strip():
+                return body
+            empty_seen += 1
+            if empty_seen >= _MAX_EMPTY_RETRIES:
+                raise TransientUnavailable(
+                    f"{operation}: 공공데이터포털이 빈 응답을 돌려줬습니다"
+                    f"({empty_seen}회 연속).\n"
+                    "  포털 쪽 일시적인 문제입니다. 인증키와는 무관합니다.\n"
+                    "  잠시 뒤 다시 시도하시거나, 값을 직접 입력하시면 계산은 그대로 됩니다."
+                )
+            attempt -= 1  # 빈 응답은 429·5xx 예산을 쓰지 않는다
+            time.sleep(_EMPTY_RETRY_DELAY)
+            continue
         except urllib.error.HTTPError as exc:
             retryable = exc.code == 429 or 500 <= exc.code < 600
-            if not retryable or attempt == _MAX_ATTEMPTS:
+            if not retryable or attempt >= _MAX_ATTEMPTS:
                 if exc.code == 429:
                     raise RateLimited(
                         f"{operation}: 공공데이터포털이 요청 속도를 제한했습니다(429).\n"
@@ -352,12 +404,58 @@ def _get_with_retry(url: str, operation: str) -> str:
             hinted = exc.headers.get("Retry-After") if exc.headers else None
             time.sleep(float(hinted) if hinted and hinted.isdigit() else delay)
             delay *= 2
+        except BuildingHubError:
+            # ⚠️ 빈 응답 판정은 `try` 안에서 던진다. 이 절이 없으면 아래 `except Exception`이
+            #    도로 잡아서 TransientUnavailable이 일반 오류로 둔갑한다 —
+            #    "인증키와 무관하다"는 안내가 사라지고 원인 구분이 무너진다.
+            raise
         except Exception as exc:
-            if attempt == _MAX_ATTEMPTS:
+            if attempt >= _MAX_ATTEMPTS:
                 raise BuildingHubError(f"호출 실패: {operation}\n  {exc}") from exc
             time.sleep(delay)
             delay *= 2
-    raise BuildingHubError(f"호출 실패: {operation}")
+
+
+_ERROR_TAGS = (
+    "returnAuthMsg", "returnReasonCode", "resultMsg", "resultCode", "errMsg", "cmmMsgHeader",
+)
+
+
+def _classify_non_json(stripped: str, operation: str) -> BuildingHubError:
+    """JSON이 아닌 응답의 **원인을 구분한다.**
+
+    예전에는 전부 "인증키 미승인·한도초과 의심"으로 뭉갰다. 그런데 실제로 오는
+    응답은 세 종류이고 사용자가 할 일이 서로 다르다(2026-08-13 실측).
+
+      ① 빈 본문      — 포털 과부하. 기다리면 된다. **키와 무관하다.**
+      ② XML 오류문서 — 여기에 진짜 사유가 적혀 있다(키 미등록·한도초과·파라미터 오류).
+      ③ HTML         — 점검 안내 페이지 등.
+
+    ①을 키 문제라고 말하면 사용자가 멀쩡한 키를 재발급하러 간다. 그게 실제로
+    화면에 떴던 문구다.
+    """
+    if not stripped:
+        return TransientUnavailable(
+            f"{operation}: 공공데이터포털이 빈 응답을 돌려줬습니다.\n"
+            "  포털 쪽 일시적인 문제입니다. 인증키와는 무관합니다.\n"
+            "  잠시 뒤 다시 시도하시거나, 값을 직접 입력하시면 계산은 그대로 됩니다."
+        )
+
+    reasons = []
+    for tag in _ERROR_TAGS:
+        for m in re.finditer(rf"<{tag}>(.*?)</{tag}>", stripped, re.S):
+            text = m.group(1).strip()
+            if text:
+                reasons.append(f"{tag}={text}")
+    if reasons:
+        return BuildingHubError(
+            f"{operation}: 포털이 오류를 돌려줬습니다.\n  " + "\n  ".join(reasons[:4])
+        )
+
+    head = stripped[:200].replace("\n", " ")
+    return BuildingHubError(
+        f"{operation}: JSON이 아닌 응답입니다.\n  앞부분: {head}"
+    )
 
 
 def _call_page(
@@ -380,10 +478,7 @@ def _call_page(
 
     stripped = raw.lstrip()
     if not stripped.startswith(("{", "[")):
-        raise BuildingHubError(
-            f"JSON이 아닌 응답(인증키 미승인·한도초과 의심): {operation}\n"
-            f"  앞부분: {stripped[:300]}"
-        )
+        raise _classify_non_json(stripped, operation)
 
     doc = json.loads(raw)
     body = doc.get("response", {}).get("body")
