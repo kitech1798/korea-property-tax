@@ -61,7 +61,7 @@ from realestate_tax.engine.transfer_tax import (
     compute_transfer_tax,
 )
 from realestate_tax.intake import LOOKUP_GUIDE_KO, Severity, intake
-from realestate_tax.rules import RuleSet, Track, default_ruleset_root
+from realestate_tax.rules import RuleError, RuleSet, Track, default_ruleset_root
 from ui import address as A
 from ui import render as R
 from ui.theme import CSS, DISCLAIMER
@@ -680,7 +680,26 @@ def main_options() -> JongbuseOptions:
 with tab_holding:
     case = build_case(year)
     opts = main_options()
-    result = compute_jongbuse(case, ME, rs, track=effective_track, options=opts)
+
+    # ⚠️ 규칙 하나가 없다고 **화면 전체가 죽으면 안 된다**(2026-08-13 배포본에서 발생).
+    #
+    #   룰셋에 조건에 맞는 블록이 없으면 resolver가 MissingRule을 던진다. 그건
+    #   "조용히 기본값으로 때우지 않는다"는 이 프로젝트의 설계이고 옳다. 다만 그
+    #   예외가 화면까지 올라오면 Streamlit이 빨간 상자에 **가려진 트레이스백**만
+    #   띄우고 앱이 통째로 멈춘다 — 사용자는 무엇을 해야 할지 알 수 없다.
+    #
+    #   숨기지 않는다. 무엇이 없는지 그대로 보여주고, 다른 탭은 살려 둔다.
+    result = None
+    try:
+        result = compute_jongbuse(case, ME, rs, track=effective_track, options=opts)
+    except RuleError as exc:
+        R.note(
+            "이 조건에서는 계산할 규칙이 없습니다",
+            f"{exc}\n\n적용 법령이나 과세연도를 바꾸면 계산될 수 있습니다. "
+            "이 화면만 멈추고 다른 탭은 그대로 쓸 수 있습니다.",
+            "warn",
+        )
+        st.stop()
 
     R.badges(k for k, _ in result.trace.certainty_concerns())
 
