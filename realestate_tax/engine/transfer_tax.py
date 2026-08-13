@@ -407,7 +407,11 @@ def compute_transfer_tax(
                     Alternative(
                         key="income_tax_house_count_special",
                         label_ko="소득세법 시행령 §155 주택 수 특례",
-                        reason_ko=count_note + " — 이 엔진은 아직 판정하지 않으므로 세무서 확인이 필요합니다",
+                        # ★ 예전에는 여기서 "이 엔진은 아직 판정하지 않으므로"를 무조건
+                        #   덧붙였다. 그런데 일시적 2주택 처분기한 단축처럼 **엔진이
+                        #   판정을 마치고 탈락시킨** 경우에도 같은 문구가 붙어, 판정한
+                        #   것을 안 한 것처럼 말하게 됐다. 안내문은 자기완결형으로 둔다.
+                        reason_ko=count_note,
                         actionable=True,
                     ),
                 )
@@ -617,6 +621,54 @@ def _transfer_house_count(
             sell_years = periods.full_years(firsts[new_id], on)
             min_gap = int(spec.get("min_years_before_new", 1))
             max_sell = int(spec.get("max_years_to_sell_old", 3))
+
+            # ── 개편안: 조정대상지역 안에서는 처분기한이 3년 → 2년 ──────────
+            #
+            # ⚠️ 2026-08-13 멀티에이전트 감사에서 잡힌 누락. 룰셋에 값을 넣어 두고
+            #    엔진이 `regulated_shortened`를 **한 번도 읽지 않았다.** 테스트는
+            #    룰셋 payload만 대조해 전부 통과했다 — 이 프로젝트가 여섯 번 앓은
+            #    "모델에 있는 사실을 엔진이 안 읽는다"의 일곱 번째다.
+            #    실측: 조정지역 2채, 신규취득 후 2년 2개월 양도에서 3,749만원으로
+            #    안내되던 사건의 실제 부담이 5.31억이었다(약 4.9억 과소).
+            #
+            # 상세본 p.73 단서신설의 각주가 요건을 정한다 —
+            #   "조정대상지역 소재 종전주택을 보유한 상태에서 조정대상지역 소재
+            #    신규주택 취득"
+            # 즉 **두 주택 모두** 조정대상지역이어야 하고, 판정 시점은 신규 취득 시다.
+            shortened = spec.get("regulated_shortened") or {}
+            shorten_note = ""
+            if shortened and firsts[new_id] >= shortened["new_house_acquired_from"]:
+                zone_old = check_regulated(
+                    case.find_property(old_id).legal_dong_code,
+                    ruleset, on=firsts[new_id], track=track,
+                )
+                zone_new = check_regulated(
+                    case.find_property(new_id).legal_dong_code,
+                    ruleset, on=firsts[new_id], track=track,
+                )
+                both_yes = zone_old.designation is YES and zone_new.designation is YES
+                any_unknown = UNKNOWN in (zone_old.designation, zone_new.designation)
+
+                if both_yes:
+                    max_sell = int(shortened["max_years_to_sell_old"])
+                    shorten_note = (
+                        f"신규주택을 {firsts[new_id]}에 취득했고 두 주택이 모두 "
+                        f"조정대상지역이라 처분기한이 {max_sell}년입니다(개편안). "
+                        + str(shortened.get("grandfather_note_ko", "")).strip()
+                    )
+                elif any_unknown:
+                    # ★ 여기서 3년으로 밀고 가면 **비과세를 잘못 내준다.**
+                    #   주택 수를 줄이는 특례는 세액을 낮추므로, 확인 못 한 채
+                    #   적용하지 않는다는 이 함수의 원칙 그대로 판정을 접는다.
+                    return counted, "", (
+                        f"일시적 2주택 처분기한이 {max_sell}년인지 "
+                        f"{shortened['max_years_to_sell_old']}년인지 판정할 수 없습니다 — "
+                        "개편안은 두 주택이 모두 조정대상지역일 때 기한을 줄입니다"
+                        f"(신규 취득 {firsts[new_id]} 당시 "
+                        f"종전주택 {zone_old.reason_ko} / 신규주택 {zone_new.reason_ko}). "
+                        "세무서에 확인해주세요."
+                    )
+
             # 양도하는 것이 **종전주택**이어야 한다. 신규주택을 팔면 특례가 아니다.
             if property_id == old_id and gap_years >= min_gap and sell_years < max_sell:
                 applied = (
@@ -624,7 +676,16 @@ def _transfer_house_count(
                     f"{gap_years}년 후 신규 취득 {firsts[new_id]} → "
                     f"{sell_years}년 만에 종전주택 양도 (요건 {min_gap}년 이상 · {max_sell}년 이내)"
                 )
-                return (property_id,), applied, ""
+                return (property_id,), applied, shorten_note
+            if property_id == old_id and gap_years >= min_gap and shorten_note:
+                # 단축 때문에 탈락한 경우다. 왜 탈락했는지 말해주지 않으면
+                # 사용자는 3년인 줄 알고 계획을 세운다.
+                return counted, "", (
+                    f"신규주택 취득 {firsts[new_id]}부터 {sell_years}년이 지나 "
+                    f"일시적 2주택 처분기한({max_sell}년)을 넘겼습니다. " + shorten_note
+                    + " 다만 '26.8.3. 이전에 취득하거나 매매계약을 체결하고 계약금을 "
+                    "지급했다면 종전규정(3년)이 적용되니 확인해주세요."
+                )
 
     # ── §155② 상속주택 — 일반주택을 양도할 때만, 동일세대가 아닐 때만 ─
     inherited_ids = {
@@ -652,7 +713,7 @@ def _transfer_house_count(
                     "상속받은 주택이 있습니다. **일반주택**을 양도하면 상속주택은 주택 수에서 "
                     "빠져 1세대1주택이 될 수 있습니다(§155②). 다만 **상속개시 당시 피상속인과 "
                     "같은 세대였는지**에 따라 결론이 정반대로 갈리는데(§155② 단서) 그 사실이 "
-                    "입력되지 않아 판정하지 않았습니다"
+                    "입력되지 않아 판정하지 않았습니다 — 세무서 확인이 필요합니다"
                 )
             # same_household is True → 단서: 동거봉양 합가로 2주택이 된 경우
             #   '합치기 이전부터 보유하던 주택'만 상속주택으로 본다. 합가 시점을
@@ -660,7 +721,8 @@ def _transfer_house_count(
             return counted, "", (
                 "상속개시 당시 피상속인과 같은 세대였습니다. 이 경우 §155② 단서에 따라 "
                 "**동거봉양 합가**로 2주택이 된 경우의 '합치기 이전부터 보유하던 주택'만 "
-                "상속주택으로 봅니다. 합가 시점을 입력받지 않아 판정하지 않았습니다"
+                "상속주택으로 봅니다. 합가 시점을 입력받지 않아 판정하지 않았습니다 — "
+                "세무서 확인이 필요합니다"
             )
 
     # ── 확인이 필요한 나머지는 적용하지 않고 알린다 ──────────────────
