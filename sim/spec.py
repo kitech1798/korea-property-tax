@@ -33,6 +33,8 @@ from realestate_tax.domain.models import (
     HouseholdId,
     ImputedResidenceReason,
     InheritedMeta,
+    LeaseOrigin,
+    LeaseSpell,
     Ownership,
     Person,
     PersonId,
@@ -207,7 +209,7 @@ class Scenario:
 _SCENARIO_KEYS = {
     "id", "label", "origin", "intent", "expectation", "year", "years", "growth",
     "tracks", "subject", "persons", "households", "properties", "ownerships",
-    "residences", "elections", "prior_year_total_tax", "resides_in_main_house",
+    "residences", "leases", "elections", "prior_year_total_tax", "resides_in_main_house",
     "joint_spouse_election", "transfer", "burden_gift", "tags",
 }
 _PERSON_KEYS = {"id", "type", "name", "birth", "household", "spouse", "is_resident"}
@@ -218,6 +220,10 @@ _PROPERTY_KEYS = {
 }
 _OWNERSHIP_KEYS = {"person", "property", "share", "acquired", "cause", "inherited"}
 _RESIDENCE_KEYS = {"person", "property", "start", "end", "imputed_reason"}
+_LEASE_KEYS = {
+    "property", "start", "end", "origin", "contracted", "deposit", "rent",
+    "down_payment_evidenced", "vacated", "ended_by_tenant_circumstance", "tenant",
+}
 _ELECTION_KEYS = {"person", "kind", "year", "designated_taxpayer", "auto_optimize"}
 _RENTAL_KEYS = {"type", "registered_on", "obligation_end", "rent_increase_within_cap"}
 _INHERITED_KEYS = {"date", "share", "value"}
@@ -258,6 +264,9 @@ def parse(raw: Mapping[str, Any], *, source: Path | None = None) -> Scenario:
     residences = tuple(
         _residence(r, f"{where}.residences[{i}]") for i, r in enumerate(raw.get("residences") or ())
     )
+    leases = tuple(
+        _lease(l, f"{where}.leases[{i}]") for i, l in enumerate(raw.get("leases") or ())
+    )
     elections = tuple(
         _election(e, f"{where}.elections[{i}]") for i, e in enumerate(raw.get("elections") or ())
     )
@@ -273,6 +282,7 @@ def parse(raw: Mapping[str, Any], *, source: Path | None = None) -> Scenario:
             properties=properties,
             ownerships=ownerships,
             residences=residences,
+            leases=leases,
             elections=elections,
             prior_year_total_tax=prior_won,
         )
@@ -418,6 +428,37 @@ def _residence(raw: Mapping[str, Any], where: str) -> ResidenceSpell:
                 if raw.get("imputed_reason")
                 else None
             ),
+        )
+    except ValueError as exc:
+        raise SpecError(f"{where}: {exc}") from exc
+
+
+def _lease(raw: Mapping[str, Any], where: str) -> LeaseSpell:
+    """임대차 구간. 판정(상생임대 여부·갱신요구권 소진)은 절대 적지 않는다.
+
+    ⚠️ `down_payment_evidenced`를 안 적으면 **모름(None)**이다. 시나리오 작성자가
+       빼먹은 것을 '확인됨'으로 읽으면, 요건을 못 갖춘 사건이 조용히 통과해
+       불변식 검사가 무의미해진다.
+    """
+    _reject_unknown(raw, _LEASE_KEYS, where)
+    evidenced = raw.get("down_payment_evidenced")
+    try:
+        return LeaseSpell(
+            property_id=PropertyId(str(_require(raw, "property", where))),
+            start=_as_date(_require(raw, "start", where), f"{where}.start"),
+            end=_as_opt_date(raw.get("end"), f"{where}.end"),
+            origin=(
+                _enum(LeaseOrigin, raw["origin"], f"{where}.origin")
+                if raw.get("origin")
+                else LeaseOrigin.NEW
+            ),
+            contracted_on=_as_opt_date(raw.get("contracted"), f"{where}.contracted"),
+            deposit=_as_won(raw.get("deposit", 0), f"{where}.deposit"),
+            monthly_rent=_as_won(raw.get("rent", 0), f"{where}.rent"),
+            down_payment_evidenced=None if evidenced is None else bool(evidenced),
+            vacated_on=_as_opt_date(raw.get("vacated"), f"{where}.vacated"),
+            ended_by_tenant_circumstance=bool(raw.get("ended_by_tenant_circumstance", False)),
+            tenant_ref=str(raw.get("tenant", "")),
         )
     except ValueError as exc:
         raise SpecError(f"{where}: {exc}") from exc

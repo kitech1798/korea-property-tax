@@ -35,6 +35,9 @@ from ..rules.resolver import RuleSet
 from ..rules.schema import Track
 from . import periods
 from .regions import UNKNOWN, YES, check_regulated
+from .sangsaeng import SangsaengVerdict
+from .sangsaeng import assess as sangsaeng_assess
+from .sangsaeng import waives_residence
 from .special_houses import assess
 from .trace import (
     Alternative,
@@ -437,8 +440,16 @@ def compute_transfer_tax(
     # 1주택이라는 사실만으로 비과세가 되지 않는다. 시행령 §154①의 보유·거주
     # 요건을 통과해야 한다. 이 게이트가 없어서 6개월 보유 1주택자에게
     # 2.29억을 0원으로 안내하던 결함이 있었다(2026-08-04 감사).
+    # 상생임대주택이면 거주요건의 '제한'을 받지 않는다(시행령 §155의3①).
+    # 비과세와 장특공제 두 곳에서 쓰이므로 여기서 한 번만 판정한다.
+    sang = sangsaeng_assess(case, event.property_id, ruleset, on, track)
+    sang_waives = waives_residence(sang, on)
+    if sang.applies or sang.undecidable:
+        children.append(_sangsaeng_node(sang, sang_waives, on))
+
     eligible, req_node = _exemption_eligible(
-        case, ruleset, on, track, event, prop, one_house, subject
+        case, ruleset, on, track, event, prop, one_house, subject,
+        sangsaeng_waives=sang_waives,
     )
     if req_node is not None:
         children.append(req_node)
@@ -454,7 +465,8 @@ def compute_transfer_tax(
 
     # ── 05. 장기보유특별공제 (개정안: 장기거주 소득공제) ─────────────
     deduction, ded_node = _long_term_deduction(
-        ruleset, on, track, event, taxable_gain, one_house, heavy_applies, subject
+        ruleset, on, track, event, taxable_gain, one_house, heavy_applies, subject,
+        sangsaeng_waives=sang_waives,
     )
     children.append(ded_node)
 
@@ -686,6 +698,57 @@ def _payload_of(
     return res.block.payload if res is not None else None
 
 
+def _sangsaeng_node(v: SangsaengVerdict, waives: bool, on: date) -> TraceNode:
+    """상생임대주택 판정을 화면에 드러낸다.
+
+    이 판정은 비과세 12억을 좌우하는데 계산식에는 숫자로 나타나지 않는다.
+    노드로 남기지 않으면 사용자가 "왜 비과세가 됐는지" 검증할 수 없다.
+    """
+    overdue = v.applies and not waives
+    if waives:
+        taken = "적용 — 거주요건 면제"
+    elif overdue:
+        taken = f"상실 — 양도기한 {v.transfer_deadline} 초과"
+    elif v.undecidable:
+        taken = "판정 불가"
+    else:
+        taken = "미적용"
+
+    lines: list[str] = []
+    if v.lease is not None:
+        lines.append(
+            f"상생임대차계약 {v.lease.start}~{v.lease.actual_end or '미정'}"
+            + (f" · 직전계약 {v.prior.start}~{v.prior.actual_end or '미정'}" if v.prior else "")
+        )
+    if v.transfer_deadline is not None:
+        lines.append(
+            f"개편안 양도기한 {v.transfer_deadline}까지 — 넘기면 거주요건 면제가 사라집니다"
+        )
+    lines.extend(v.checks_ko)
+    lines.extend(v.reasons_ko)
+    if waives:
+        # ★ 이 한 줄이 이 노드의 존재 이유다. 면제를 '거주한 것으로 쳐준다'로
+        #   오해하면 장기보유특별공제를 실제보다 크게 잡는다.
+        lines.append(
+            "면제되는 것은 거주기간의 '제한'입니다. 거주기간을 2년으로 쳐주는 것이 "
+            "아니므로, 장기보유특별공제의 거주기간 공제율은 실제 거주기간으로 "
+            "계산합니다(실거주 0년이면 거주공제 0%)."
+        )
+
+    return node(
+        "tr.03a.sangsaeng",
+        "상생임대주택 특례",
+        Value.flag(waives, certainty=v.certainty, label="거주요건 면제"),
+        formula="직전임대차 1년6개월 + 상생임대차 2년 + 증가율 5% 이내(시행령 §155의3①)",
+        substitution=" / ".join(lines) if lines else "해당 없음",
+        branch=BranchRecord(condition_ko="상생임대주택 특례", taken=taken),
+        note_ko=(
+            "상생임대주택은 1세대1주택 비과세와 장기보유특별공제(표2)의 2년 "
+            "거주요건을 면제받습니다(소득세법 시행령 §155의3①)."
+        ),
+    )
+
+
 def _exemption_eligible(
     case: TaxCase,
     ruleset: RuleSet,
@@ -695,6 +758,7 @@ def _exemption_eligible(
     prop,
     one_house: bool,
     subject: SubjectRef,
+    sangsaeng_waives: bool = False,
 ) -> tuple[bool, TraceNode | None]:
     """1세대1주택 비과세의 보유·거주 요건(소득세법 시행령 §154①).
 
@@ -742,6 +806,14 @@ def _exemption_eligible(
     #   답이 갈리지 않는 지점에서까지 판정 불가를 내는 것은 정직이 아니라 무능이다.
     residence_met = lived is not None and lived >= min_live
     needs_residence = zone_then.designation is YES
+
+    # ★ 상생임대주택은 이 요건의 '제한'을 받지 않는다(시행령 §155의3①이 §154①을 지목).
+    #   거주기간을 채운 것으로 **의제하는 것이 아니라**, 요건 자체가 걸리지 않는다.
+    #   그래서 여기서만 통과시키고, 장특공제의 거주기간 공제율에는 손대지 않는다.
+    #   거주요건 면제 자체는 현행법(§155의3)이다. 개편안이 손대는 것은 '언제까지
+    #   팔아야 하는가'뿐이고, 그 미확정성은 상생임대 판정 노드가 따로 드러낸다.
+    if not residence_met and sangsaeng_waives:
+        residence_met = True
 
     if not residence_met:
         if needs_residence:
@@ -951,6 +1023,7 @@ def _long_term_deduction(
     one_house: bool,
     heavy_applies: bool,
     subject: SubjectRef,
+    sangsaeng_waives: bool = False,
 ) -> tuple[Value, TraceNode]:
     """장기보유특별공제 → 개정안 「장기거주 소득공제」.
 
@@ -1012,9 +1085,19 @@ def _long_term_deduction(
     # ── 게이트 ② 시행령 §159의4: 표2는 "거주기간이 2년 이상인" 1세대1주택만 ──
     # 1세대1주택이어도 거주 2년 미만이면 다주택자와 같은 표1(보유 연2%·최대30%)이다.
     # 거주기간 미입력은 요건 충족으로 보지 않는다 — 유리한 쪽 자동 가정 금지.
+    #
+    # ★★ 상생임대주택은 이 **게이트만** 면제받는다(§155의3①이 §159의4를 지목).
+    #    §159의4는 표2 대상을 "거주기간이 2년 이상인 것"으로 정의하므로, 면제되는
+    #    것은 표2에 **들어갈 자격**이다. 거주기간을 2년으로 의제하는 규정은 없다.
+    #
+    #    그래서 아래 `live_rate`는 손대지 않는다 — 실거주 0년이면 거주공제는 0%다.
+    #    2026 개편안이 보유공제를 거주공제로 옮기므로(연 4%→2%→폐지) 이 구분이
+    #    치명적이 된다. 상생임대 특례가 살아 있어도 실거주 0년 주택의 공제율은
+    #    '27년 40% → '28년 20% → '29년 0%로 무너진다.
+    #    **비과세 12억은 지켜지지만 장기보유특별공제는 지켜지지 않는다.**
     fell_back = False
     need_residence = payload.get("table2_min_residence_years")
-    if one_house and need_residence is not None:
+    if one_house and need_residence is not None and not sangsaeng_waives:
         if (event.residence_years or 0) < int(need_residence):
             fell_back = True
             res = ruleset.resolve(

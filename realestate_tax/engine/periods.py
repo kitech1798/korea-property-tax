@@ -47,6 +47,47 @@ def full_years(start: date, until: date) -> int:
     return max(0, years)
 
 
+def plus_months(d: date, months: int) -> date:
+    """월 단위 가산·감산. 말일 처리는 민법 §160③(그 월의 말일)을 따른다.
+
+      2027-01-31 + 12개월 = 2028-01-31
+      2027-01-31 +  1개월 = 2027-02-28   — 2월에 31일이 없다
+      2027-01-31 −  2개월 = 2026-11-30   — 주임법 §6①의 '2개월 전'
+
+    음수도 받는다. 갱신거절 통지기간("끝나기 6개월 전부터 2개월 전까지")을
+    종료일에서 거꾸로 세는 데 쓴다.
+    """
+    total = d.month - 1 + months
+    year = d.year + total // 12
+    month = total % 12 + 1
+    return date(year, month, min(d.day, monthrange(year, month)[1]))
+
+
+def full_months(start: date, until: date) -> int:
+    """만 개월수. `full_years`와 **같은 규약**이다 — `until`은 포함하지 않는다.
+
+    상생임대주택 특례가 임대기간을 개월로 재기 때문에 필요하다.
+      소득세법 시행령 §155의3③ "직전임대차계약 및 상생임대차계약에 따른
+      임대기간은 **월력에 따라** 계산하며, 1개월 미만인 경우에는 1개월로 본다"
+
+    '월력에 따라'가 곧 이 계산이다. 일수를 30으로 나누는 방식이 아니다.
+    (30일 나눗셈을 쓰면 2월이 낀 18개월 계약이 17개월로 읽혀 요건에서 탈락한다.)
+
+    ★ 말일 처리는 `full_years`와 같은 이유로 민법 §160③을 따른다.
+      1월 31일 개시분의 1개월은 2월에 31일이 없으므로 **2월 말일**에 만료한다.
+
+    ⚠️ 호출하는 쪽 주의 — 임대차의 '종료일'은 그 날까지 산다는 뜻(포함)이지만
+       이 함수의 `until`은 제외다. 임대기간을 잴 때는 종료일 **다음 날**을 넘겨야
+       한다. 2025-02-01~2027-01-31 전세는 24개월이지 23개월이 아니다.
+       이 하루가 2년 요건을 통째로 뒤집는다.
+    """
+    months = (until.year - start.year) * 12 + (until.month - start.month)
+    anniversary_day = min(start.day, monthrange(until.year, until.month)[1])
+    if until.day < anniversary_day:
+        months -= 1
+    return max(0, months)
+
+
 def acquisition_date(
     case: TaxCase,
     person_id: PersonId,

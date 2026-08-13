@@ -1,0 +1,489 @@
+# 임대차 · 상생임대주택 · 매도시점 앵글.
+# 판정(상생임대 해당 여부·갱신요구권 소진·매도 가능일)은 전부 엔진 몫이다.
+# 여기엔 계약의 사실만 있다 — 시작·종료·체결일·보증금·계약금 증빙·성립 경위.
+
+id: lease-01
+label: 표준 상생임대 · 직전 24개월 + 상생 24개월 · 4% 인상
+origin: lease
+intent: |
+  손으로 적은 상담 메모의 기본 사건. 취득 당시 조정대상지역, 실거주 0년.
+  거주요건을 못 채웠는데 상생임대 특례로 비과세가 서는지 본다.
+  이게 안 되면 나머지 시나리오는 전부 의미가 없다.
+expectation: |
+  상생임대 요건을 모두 갖춰 거주요건이 면제된다. 양도가액이 12억을 넘으므로
+  초과분만 과세된다. 장기보유특별공제는 거주 0년이므로 보유공제만 붙는다.
+tags: [양도세, 상생임대, 비과세, 거주요건]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 김상생, birth: 1975-04-02, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seoul1
+    name: 강남 아파트
+    kind: apartment
+    dong: "1168010100"
+    urban: true
+    area_m2: 84.9
+    prices: {2027: 2_000_000_000}
+ownerships:
+  - {person: p1, property: seoul1, share: 1, acquired: 2017-03-01, cause: purchase}
+leases:
+  - {property: seoul1, start: 2023-02-01, end: 2025-01-31, contracted: 2022-12-10,
+     deposit: 500_000_000, down_payment_evidenced: true, tenant: A}
+  - {property: seoul1, start: 2025-02-01, end: 2027-01-31, contracted: 2024-12-15,
+     deposit: 520_000_000, down_payment_evidenced: true, tenant: A}
+transfer:
+  property: seoul1
+  person: p1
+  date: 2027-06-01
+  price: 3_200_000_000
+  acquisition_price: 1_200_000_000
+  acquisition_date: 2017-03-01
+  share: 1
+
+---
+
+id: lease-02
+label: 승계받은 계약이 직전임대차 · 세입자 있는 집을 샀다
+origin: lease
+intent: |
+  §155의3①1호 괄호 — "취득으로 임대인의 지위가 승계된 경우의 임대차계약은 제외".
+  상생임대 판정에서 가장 흔한 함정이다. 승계 계약을 직전계약으로 세면
+  요건을 충족한다고 잘못 안내하게 된다.
+expectation: |
+  직전임대차계약이 성립하지 않아 상생임대 특례가 적용되지 않는다.
+  거주 0년이므로 취득 당시 조정대상지역 요건에서 비과세가 탈락한다.
+tags: [양도세, 상생임대, 승계, 함정]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 이승계, birth: 1978-09-12, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seoul2
+    name: 서초 아파트
+    kind: apartment
+    dong: "1165010100"
+    urban: true
+    area_m2: 59.9
+    prices: {2027: 1_600_000_000}
+ownerships:
+  - {person: p1, property: seoul2, share: 1, acquired: 2022-11-01, cause: purchase}
+leases:
+  - {property: seoul2, start: 2022-02-01, end: 2025-01-31, contracted: 2021-12-05,
+     deposit: 400_000_000, down_payment_evidenced: true, origin: succeeded, tenant: B}
+  - {property: seoul2, start: 2025-02-01, end: 2027-01-31, contracted: 2024-12-01,
+     deposit: 415_000_000, down_payment_evidenced: true, tenant: B}
+transfer:
+  property: seoul2
+  person: p1
+  date: 2027-06-01
+  price: 2_400_000_000
+  acquisition_price: 1_100_000_000
+  acquisition_date: 2022-11-01
+  share: 1
+
+---
+
+id: lease-03
+label: 임대료 5.00% 정확히 인상 — 경계
+origin: lease
+intent: |
+  §155의3①1호는 "100분의 5를 **초과**하지 않는"이다. 5.00%는 충족이다.
+  5억 → 5억 2,500만. float으로 재면 0.05000000000000001이 되어 탈락할 수 있는 자리다.
+expectation: |
+  경계값이므로 요건을 충족한다. 상생임대 특례가 적용된다.
+tags: [양도세, 상생임대, 경계, 증가율]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 박경계, birth: 1970-01-20, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seoul3
+    name: 송파 아파트
+    kind: apartment
+    dong: "1171010100"
+    urban: true
+    prices: {2027: 1_400_000_000}
+ownerships:
+  - {person: p1, property: seoul3, share: 1, acquired: 2016-06-01, cause: purchase}
+leases:
+  - {property: seoul3, start: 2023-02-01, end: 2025-01-31, contracted: 2022-12-10,
+     deposit: 500_000_000, down_payment_evidenced: true, tenant: C}
+  - {property: seoul3, start: 2025-02-01, end: 2027-01-31, contracted: 2024-12-15,
+     deposit: 525_000_000, down_payment_evidenced: true, tenant: C}
+transfer:
+  property: seoul3
+  person: p1
+  date: 2027-06-01
+  price: 2_000_000_000
+  acquisition_price: 900_000_000
+  acquisition_date: 2016-06-01
+  share: 1
+
+---
+
+id: lease-04
+label: 상생임대차가 23개월 — 2년에서 한 달 모자람
+origin: lease
+intent: |
+  §155의3①3호 "상생임대차계약에 따라 임대한 기간이 2년 이상".
+  임대기간을 일수/30으로 재면 23개월이 24개월로 반올림될 수 있다.
+  §155의3③은 "월력에 따라" 계산하라고 한다.
+expectation: |
+  임대기간이 2년에 못 미쳐 상생임대 특례가 적용되지 않는다.
+tags: [양도세, 상생임대, 경계, 임대기간]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 최한달, birth: 1982-07-07, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seoul4
+    name: 마포 아파트
+    kind: apartment
+    dong: "1144010100"
+    urban: true
+    prices: {2027: 1_300_000_000}
+ownerships:
+  - {person: p1, property: seoul4, share: 1, acquired: 2018-01-15, cause: purchase}
+leases:
+  - {property: seoul4, start: 2023-02-01, end: 2025-01-31, contracted: 2022-12-10,
+     deposit: 400_000_000, down_payment_evidenced: true, tenant: D}
+  - {property: seoul4, start: 2025-02-01, end: 2026-12-31, contracted: 2024-12-15,
+     deposit: 415_000_000, down_payment_evidenced: true, tenant: D}
+transfer:
+  property: seoul4
+  person: p1
+  date: 2027-06-01
+  price: 1_900_000_000
+  acquisition_price: 800_000_000
+  acquisition_date: 2018-01-15
+  share: 1
+
+---
+
+id: lease-05
+label: 계약금 지급 증빙을 모른다 — 판정 불가
+origin: lease
+intent: |
+  §155의3①1호 "계약금을 지급받은 사실이 증빙서류에 의해 확인되는 경우로 한정한다".
+  모르는 것을 유리하게 처리하면 과소신고가 된다.
+expectation: |
+  요건 충족 여부를 판정하지 못한다. 비과세를 자동으로 주지 않고 확실성이 떨어진다.
+tags: [양도세, 상생임대, 판정불가, 정직성]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 정모름, birth: 1969-11-30, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seoul5
+    name: 용산 아파트
+    kind: apartment
+    dong: "1117010100"
+    urban: true
+    prices: {2027: 1_800_000_000}
+ownerships:
+  - {person: p1, property: seoul5, share: 1, acquired: 2015-05-20, cause: purchase}
+leases:
+  - {property: seoul5, start: 2023-02-01, end: 2025-01-31, contracted: 2022-12-10,
+     deposit: 600_000_000, down_payment_evidenced: true, tenant: E}
+  - {property: seoul5, start: 2025-02-01, end: 2027-01-31, contracted: 2024-12-15,
+     deposit: 620_000_000, tenant: E}
+transfer:
+  property: seoul5
+  person: p1
+  date: 2027-06-01
+  price: 2_600_000_000
+  acquisition_price: 1_000_000_000
+  acquisition_date: 2015-05-20
+  share: 1
+
+---
+
+id: lease-06
+label: 전세를 월세로 전환 — 증가율 산식이 없다
+origin: lease
+intent: |
+  §155의3②는 보증금↔월세 전환 시 민간임대주택법 §44④ 기준으로 증가율을 계산하라고
+  한다. 그 산식을 확보하지 못했으므로 지어내지 않고 판정 불가로 흘려야 한다.
+expectation: |
+  전환이 있어 증가율을 계산할 수 없다. 특례를 적용하지 않고 확인을 요구한다.
+tags: [양도세, 상생임대, 판정불가, 전환]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 한전환, birth: 1985-02-14, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seoul6
+    name: 성동 아파트
+    kind: apartment
+    dong: "1120010100"
+    urban: true
+    prices: {2027: 1_200_000_000}
+ownerships:
+  - {person: p1, property: seoul6, share: 1, acquired: 2019-03-10, cause: purchase}
+leases:
+  - {property: seoul6, start: 2023-02-01, end: 2025-01-31, contracted: 2022-12-10,
+     deposit: 500_000_000, down_payment_evidenced: true, tenant: F}
+  - {property: seoul6, start: 2025-02-01, end: 2027-01-31, contracted: 2024-12-15,
+     deposit: 300_000_000, rent: 600_000, down_payment_evidenced: true, tenant: F}
+transfer:
+  property: seoul6
+  person: p1
+  date: 2027-06-01
+  price: 1_800_000_000
+  acquisition_price: 700_000_000
+  acquisition_date: 2019-03-10
+  share: 1
+
+---
+
+id: lease-07
+label: 갱신요구권을 이미 행사한 임차인 · 다음 만기에 내보낼 수 있다
+origin: lease
+intent: |
+  §6의3②는 갱신요구권을 1회로 제한한다. 이미 행사했다면 통지만으로 끝난다.
+  엔진이 이력에서 소진 여부를 읽는지, 임차인 별칭으로 사람을 구분하는지 본다.
+expectation: |
+  갱신 위험이 없다. 매도 가능일이 임대차 종료 다음 날로 잡힌다.
+tags: [임대차, 갱신요구권, 매도시점]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 오갱신, birth: 1974-08-08, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seoul7
+    name: 광진 아파트
+    kind: apartment
+    dong: "1121510100"
+    urban: true
+    prices: {2027: 1_500_000_000}
+ownerships:
+  - {person: p1, property: seoul7, share: 1, acquired: 2014-09-01, cause: purchase}
+leases:
+  - {property: seoul7, start: 2023-02-01, end: 2025-01-31, contracted: 2022-12-10,
+     deposit: 500_000_000, down_payment_evidenced: true, tenant: G}
+  - {property: seoul7, start: 2025-02-01, end: 2027-01-31, contracted: 2024-12-15,
+     deposit: 520_000_000, down_payment_evidenced: true,
+     origin: tenant_renewal_right, tenant: G}
+transfer:
+  property: seoul7
+  person: p1
+  date: 2027-06-01
+  price: 2_200_000_000
+  acquisition_price: 800_000_000
+  acquisition_date: 2014-09-01
+  share: 1
+
+---
+
+id: lease-08
+label: 임차인이 중도 퇴거 · 계약서 기간과 실제 임대기간이 다르다
+origin: lease
+intent: |
+  §155의3①3호는 "임대한 기간"이다. 계약서에 적힌 기간이 아니다.
+  계약은 2년인데 실제로는 18개월만 살았다면 요건에 못 미친다.
+expectation: |
+  실제 임대기간이 2년에 못 미쳐 상생임대 특례가 적용되지 않는다.
+tags: [양도세, 상생임대, 중도퇴거, 임대기간]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 서퇴거, birth: 1988-12-01, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seoul8
+    name: 동작 아파트
+    kind: apartment
+    dong: "1159010100"
+    urban: true
+    prices: {2027: 1_100_000_000}
+ownerships:
+  - {person: p1, property: seoul8, share: 1, acquired: 2020-02-01, cause: purchase}
+leases:
+  - {property: seoul8, start: 2023-02-01, end: 2025-01-31, contracted: 2022-12-10,
+     deposit: 400_000_000, down_payment_evidenced: true, tenant: H}
+  - {property: seoul8, start: 2025-02-01, end: 2027-01-31, contracted: 2024-12-15,
+     deposit: 415_000_000, down_payment_evidenced: true,
+     vacated: 2026-07-31, ended_by_tenant_circumstance: true, tenant: H}
+transfer:
+  property: seoul8
+  person: p1
+  date: 2027-06-01
+  price: 1_700_000_000
+  acquisition_price: 600_000_000
+  acquisition_date: 2020-02-01
+  share: 1
+
+---
+
+id: lease-09
+label: 상생임대차가 2026년 안에 끝났다 — 양도기한 '27.12.31.
+origin: lease
+intent: |
+  개편안 상세본 p.78 ➊ — "'26.12.31. 이전 상생임대차계약 종료: '27.12.31.".
+  ➋(계약종료 후 1년)와 다른 분기다. 분기를 뒤집으면 기한이 1년 어긋난다.
+expectation: |
+  양도기한이 '27.12.31.로 잡힌다. 그 이후 양도하면 거주요건 면제가 사라진다.
+tags: [양도세, 상생임대, 양도기한, 개편안]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 유조기, birth: 1966-06-06, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seoul9
+    name: 노원 아파트
+    kind: apartment
+    dong: "1135010100"
+    urban: true
+    prices: {2027: 900_000_000}
+ownerships:
+  - {person: p1, property: seoul9, share: 1, acquired: 2013-04-01, cause: purchase}
+leases:
+  - {property: seoul9, start: 2022-07-01, end: 2024-06-30, contracted: 2022-05-10,
+     deposit: 300_000_000, down_payment_evidenced: true, tenant: I}
+  - {property: seoul9, start: 2024-07-01, end: 2026-06-30, contracted: 2024-05-15,
+     deposit: 312_000_000, down_payment_evidenced: true, tenant: I}
+transfer:
+  property: seoul9
+  person: p1
+  date: 2027-06-01
+  price: 1_500_000_000
+  acquisition_price: 500_000_000
+  acquisition_date: 2013-04-01
+  share: 1
+
+---
+
+id: lease-10
+label: 임대차가 한 건뿐 — 직전계약이 없다
+origin: lease
+intent: |
+  상생임대는 **두 계약의 비교**다. 한 건만 있으면 비교 대상이 없다.
+  엔진이 비교 없이 특례를 주면 배선이 잘못된 것이다.
+expectation: |
+  직전임대차계약이 없어 상생임대 특례가 적용되지 않는다.
+tags: [양도세, 상생임대, 최소사례]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 남단독, birth: 1990-03-03, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seoul10
+    name: 은평 아파트
+    kind: apartment
+    dong: "1138010100"
+    urban: true
+    prices: {2027: 800_000_000}
+ownerships:
+  - {person: p1, property: seoul10, share: 1, acquired: 2021-01-05, cause: purchase}
+leases:
+  - {property: seoul10, start: 2025-02-01, end: 2027-01-31, contracted: 2024-12-15,
+     deposit: 400_000_000, down_payment_evidenced: true, tenant: J}
+transfer:
+  property: seoul10
+  person: p1
+  date: 2027-06-01
+  price: 1_300_000_000
+  acquisition_price: 700_000_000
+  acquisition_date: 2021-01-05
+  share: 1
+
+---
+
+id: lease-11
+label: 비조정지역 · 거주요건이 애초에 없다
+origin: lease
+intent: |
+  거주요건은 **취득 당시 조정대상지역**인 주택에만 붙는다(시행령 §154①).
+  비조정지역이면 상생임대 특례가 있으나 마나 결과가 같아야 한다.
+  같은 결과가 나오는지로 특례가 다른 판정을 오염시키지 않는지 본다.
+expectation: |
+  거주요건이 없으므로 상생임대 여부와 무관하게 비과세가 성립한다.
+tags: [양도세, 상생임대, 비조정지역, 무해성]
+year: 2027
+subject: p1
+persons:
+  - {id: p1, name: 강지방, birth: 1972-10-10, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: busan9
+    name: 해운대 아파트
+    kind: apartment
+    dong: "2635010300"
+    urban: true
+    prices: {2027: 1_000_000_000}
+ownerships:
+  - {person: p1, property: busan9, share: 1, acquired: 2012-08-01, cause: purchase}
+leases:
+  - {property: busan9, start: 2023-02-01, end: 2025-01-31, contracted: 2022-12-10,
+     deposit: 300_000_000, down_payment_evidenced: true, tenant: K}
+  - {property: busan9, start: 2025-02-01, end: 2027-01-31, contracted: 2024-12-15,
+     deposit: 312_000_000, down_payment_evidenced: true, tenant: K}
+transfer:
+  property: busan9
+  person: p1
+  date: 2027-06-01
+  price: 1_600_000_000
+  acquisition_price: 600_000_000
+  acquisition_date: 2012-08-01
+  share: 1
+
+---
+
+id: lease-12
+label: 체결일이 '26.12.31.을 하루 넘겼다
+origin: lease
+intent: |
+  §155의3①1호 — "2021년 12월 20일부터 2026년 12월 31일까지의 기간 중에 체결".
+  하루 차이로 제도 자체를 못 쓴다. 임대 개시일이 아니라 **체결일**로 갈린다.
+expectation: |
+  체결일이 기한 밖이라 상생임대차계약이 성립하지 않는다.
+tags: [양도세, 상생임대, 경계, 체결일]
+year: 2029
+subject: p1
+persons:
+  - {id: p1, name: 문하루, birth: 1980-01-01, household: h1, is_resident: true}
+households:
+  - {id: h1, members: [p1]}
+properties:
+  - id: seoul12
+    name: 강동 아파트
+    kind: apartment
+    dong: "1174010100"
+    urban: true
+    prices: {2029: 1_200_000_000}
+ownerships:
+  - {person: p1, property: seoul12, share: 1, acquired: 2015-02-01, cause: purchase}
+leases:
+  - {property: seoul12, start: 2025-02-01, end: 2027-01-31, contracted: 2024-12-10,
+     deposit: 500_000_000, down_payment_evidenced: true, tenant: L}
+  - {property: seoul12, start: 2027-02-01, end: 2029-01-31, contracted: 2027-01-01,
+     deposit: 520_000_000, down_payment_evidenced: true, tenant: L}
+transfer:
+  property: seoul12
+  person: p1
+  date: 2029-06-01
+  price: 2_000_000_000
+  acquisition_price: 800_000_000
+  acquisition_date: 2015-02-01
+  share: 1

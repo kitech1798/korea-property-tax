@@ -20,8 +20,12 @@ import math
 from dataclasses import replace
 from typing import Callable, Iterable
 
+from datetime import timedelta
+
 from realestate_tax.domain.models import PriceFact, Property, TaxCase, Won
 from realestate_tax.engine import strategy as st
+from realestate_tax.engine.sell_window import ConstraintKind, optimize
+from realestate_tax.engine.transfer_tax import compute_transfer_tax
 from realestate_tax.intake.price import deduction_boundaries
 from realestate_tax.rules.resolver import RuleSet
 from realestate_tax.rules.schema import Track
@@ -105,6 +109,9 @@ def check(scenario: Scenario, outcome: Outcome, ruleset: RuleSet) -> tuple[Viola
         _no_unexpected_cliff,
         _joint_spouse_optimal,
         _share_additivity,
+        _sangsaeng_never_raises_tax,
+        _sangsaeng_deadline_direction,
+        _sell_window_contract,
     ):
         try:
             out.extend(fn(scenario, outcome, ruleset))
@@ -650,6 +657,175 @@ def _share_additivity(s: Scenario, o: Outcome, rs: RuleSet) -> Iterable[Violatio
                 f"{abs(parts - whole.total.as_int()):,}원 어긋난다."
             ),
             evidence={"property": str(prop.id)},
+        )
+
+
+# -- 15. 상생임대 특례는 세금을 늘리지 않는다 -------------------------------
+
+
+def _sangsaeng_never_raises_tax(s: Scenario, o: Outcome, rs: RuleSet) -> Iterable[Violation]:
+    """임대차 이력을 지운 사건보다 세금이 **많으면** 버그다.
+
+    상생임대주택 특례는 거주요건을 면제하는 제도다. 면제는 요건을 **푸는** 방향이므로
+    같은 사실관계에서 세금이 늘어날 길이 없다. 늘었다면 배선이 반대이거나, 특례가
+    다른 판정을 망가뜨리고 있다는 뜻이다.
+
+    반증 가능성 — 특례 적용 시 장특공제 표를 잘못 갈아끼우면 이 경보가 울린다.
+    실제로 표2 진입과 표1 폴백을 뒤집으면 공제율이 40%에서 30%로 떨어져 걸린다.
+    """
+    event = s.transfer.event
+    if event is None or not s.case.leases:
+        return
+    bare = replace(s.case, leases=())
+    for name, track in _TRACKS.items():
+        if name not in s.tracks:
+            continue
+        with_lease, err_a = _safe(lambda: compute_transfer_tax(s.case, event, rs, track=track))
+        without, err_b = _safe(lambda: compute_transfer_tax(bare, event, rs, track=track))
+        if err_a or err_b or with_lease is None or without is None:
+            continue
+        if with_lease.total.as_int() > without.total.as_int():
+            yield Violation(
+                rule="sangsaeng_never_raises_tax",
+                severity="block",
+                detail_ko=(
+                    f"[{name}] 임대차 이력이 있는 쪽 세액 {with_lease.total.as_int():,}원이 "
+                    f"이력을 지운 쪽 {without.total.as_int():,}원보다 크다. "
+                    "거주요건 면제가 세금을 늘릴 수는 없다."
+                ),
+                evidence={
+                    "track": name,
+                    "with_lease": with_lease.total.as_int(),
+                    "without": without.total.as_int(),
+                },
+            )
+
+
+# -- 16. 양도기한을 넘기면 세금은 늘기만 한다 -------------------------------
+
+
+def _sangsaeng_deadline_direction(s: Scenario, o: Outcome, rs: RuleSet) -> Iterable[Violation]:
+    """기한 다음 날이 기한일보다 **싸면** 버그다.
+
+    개편안의 양도기한을 넘기면 거주요건 면제가 사라진다. 사라지면 비과세와
+    장특공제가 함께 줄어드니 세금은 늘거나 같아야 한다. 줄었다면 기한 판정의
+    부등호가 뒤집혔거나, 기한 전후로 다른 규칙이 잘못 걸린 것이다.
+
+    반증 가능성 — `within_transfer_deadline`의 `<=`를 `>=`로 바꾸면 즉시 울린다.
+    """
+    event = s.transfer.event
+    if event is None or not s.case.leases or "reform" not in s.tracks:
+        return
+
+    window, err = _safe(
+        lambda: optimize(
+            s.case, event, rs,
+            start=event.transfer_date,
+            end=event.transfer_date.replace(year=event.transfer_date.year + 3),
+            track=Track.REFORM, require_vacant=False,
+        )
+    )
+    if err or window is None:
+        return
+    deadline = next(
+        (c.on for c in window.constraints
+         if c.kind is ConstraintKind.DEADLINE and "상생임대" in c.label_ko),
+        None,
+    )
+    if deadline is None:
+        return
+
+    at = {p.on: p.transfer_tax for p in window.points}
+    before, after = at.get(deadline), at.get(deadline + timedelta(days=1))
+    if before is None or after is None:
+        return
+    if after < before:
+        yield Violation(
+            rule="sangsaeng_deadline_direction",
+            severity="block",
+            detail_ko=(
+                f"양도기한 {deadline} 세액 {before:,}원보다 다음 날 {after:,}원이 더 싸다. "
+                "특례가 사라지는데 세금이 줄 수는 없다."
+            ),
+            evidence={"deadline": str(deadline), "before": before, "after": after},
+        )
+
+
+# -- 17. 매도시점 최적화기의 계약 -------------------------------------------
+
+
+def _sell_window_contract(s: Scenario, o: Outcome, rs: RuleSet) -> Iterable[Violation]:
+    """최적화기가 스스로 어긴 약속을 잡는다.
+
+      ① `best`는 반드시 팔 수 있는 날이어야 한다.
+      ② `best`가 `naive_best`보다 쌀 수는 없다 — 제약은 선택지를 줄이기만 한다.
+      ③ 모든 제약 기한일이 표본에 들어 있어야 한다. 표본에 없으면 절벽을 못 본다.
+      ④ 갱신 시나리오가 기본보다 쌀 수는 없다 — 갱신도 선택지를 줄이기만 한다.
+
+    ③이 이 검사의 핵심이다. 후보를 균등 격자로만 뽑으면 하루짜리 절벽을 통째로
+    놓치는데, 결과는 멀쩡해 보인다. 표본 자체를 검사해야 잡힌다.
+    """
+    event = s.transfer.event
+    if event is None or not s.case.leases:
+        return
+    start = event.transfer_date
+    end = start.replace(year=start.year + 3)
+
+    base, err = _safe(
+        lambda: optimize(s.case, event, rs, start=start, end=end, track=Track.REFORM)
+    )
+    if err or base is None:
+        return
+
+    if base.best is not None and not base.best.feasible:
+        yield Violation(
+            rule="sell_window_best_feasible",
+            severity="block",
+            detail_ko=f"최적안 {base.best.on}이 팔 수 없는 날이다: {base.best.blocked_by}",
+            evidence={"on": str(base.best.on)},
+        )
+
+    if base.best is not None and base.naive_best is not None:
+        if base.best.transfer_tax < base.naive_best.transfer_tax:
+            yield Violation(
+                rule="sell_window_naive_is_lower_bound",
+                severity="block",
+                detail_ko=(
+                    f"제약을 지킨 최적안 {base.best.transfer_tax:,}원이 제약을 무시한 "
+                    f"{base.naive_best.transfer_tax:,}원보다 싸다. 제약은 선택지를 줄이기만 한다."
+                ),
+                evidence={"best": base.best.transfer_tax, "naive": base.naive_best.transfer_tax},
+            )
+
+    sampled = {p.on for p in base.points}
+    for c in base.constraints:
+        if c.on is not None and start <= c.on <= end and c.on not in sampled:
+            yield Violation(
+                rule="sell_window_samples_deadlines",
+                severity="block",
+                detail_ko=(
+                    f"제약 '{c.label_ko}'의 기한 {c.on}이 표본에 없다. "
+                    "경계를 표본에 넣지 않으면 하루짜리 절벽을 못 본다."
+                ),
+                evidence={"label": c.label_ko, "on": str(c.on)},
+            )
+
+    renewed, err2 = _safe(
+        lambda: optimize(
+            s.case, event, rs, start=start, end=end, track=Track.REFORM, assume_renewal=True
+        )
+    )
+    if err2 or renewed is None or renewed.best is None or base.best is None:
+        return
+    if renewed.best.transfer_tax < base.best.transfer_tax:
+        yield Violation(
+            rule="sell_window_renewal_not_cheaper",
+            severity="block",
+            detail_ko=(
+                f"갱신 시나리오 {renewed.best.transfer_tax:,}원이 기본 "
+                f"{base.best.transfer_tax:,}원보다 싸다. 갱신은 매도 가능일을 밀기만 한다."
+            ),
+            evidence={"renewed": renewed.best.transfer_tax, "base": base.best.transfer_tax},
         )
 
 
