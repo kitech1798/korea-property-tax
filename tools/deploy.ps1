@@ -71,10 +71,20 @@ if (-not (Test-Path $needleFile)) {
     Write-Host "  스캔을 건너뛰고 배포하지 않습니다." -ForegroundColor Red
     exit 1
 }
-# 주석(#)과 빈 줄은 무시한다. 공백은 비교 전에 어차피 지운다.
+# ★ 정규화는 **영숫자만 남긴다.**
+#
+#   2026-08-13, 세 번째 사고. 이전 판은 역슬래시와 공백만 지웠는데, 정작 저장소에
+#   남아 있던 형태는 조각을 이어 붙인 것이었다.
+#       ("119" + "[REDACTED-IP]")     ("U01T" + "[REDACTED-KEY]")
+#   따옴표와 +를 안 지우니 통과했다. 이 회피법은 원래 이 스크립트가 **자기검출을
+#   피하려고** 쓰던 기법이라, 스캐너가 자기 기법에 당한 셈이다.
+#
+#   구분자를 골라 지우는 방식은 언제나 다음 변형에 진다. 그래서 영숫자만 남긴다.
+#   오탐이 늘 수 있지만, 배포 게이트에서 오탐은 멈추면 그만이고 미탐은 유출이다.
 $needles = Get-Content $needleFile -Encoding UTF8 |
     Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith("#") } |
-    ForEach-Object { ($_ -replace '\\', '' -replace '\s', '') }
+    ForEach-Object { ($_ -replace '[^0-9A-Za-z]', '') } |
+    Where-Object { $_ }
 if (-not $needles) {
     Write-Host "탐지 문자열이 비어 있습니다. 배포를 중단합니다." -ForegroundColor Red
     exit 1
@@ -89,9 +99,9 @@ foreach ($b in $blobs) {
     if ((git cat-file -t $b 2>$null) -ne "blob") { continue }
     $raw = git cat-file -p $b 2>$null
     if (-not $raw) { continue }
-    # ★ 정규화 — 정규식 이스케이프(역슬래시)와 공백을 지우고 비교한다.
-    #   이 한 줄이 없어서 점을 이스케이프한 IP를 놓쳤다.
-    $flat = ($raw -join "`n") -replace '\\', '' -replace '\s', ''
+    # ★ 본문도 같은 규칙으로 정규화한다 — 영숫자만 남긴다.
+    #   이스케이프(`\.`)·따옴표·+·공백·줄바꿈이 사이에 끼어도 잡힌다.
+    $flat = ($raw -join "`n") -replace '[^0-9A-Za-z]', ''
     foreach ($n in $needles) {
         # 어떤 값이 걸렸는지는 **앞 4자만** 남긴다. 로그가 새 유출 경로가 되면 안 된다.
         if ($flat.Contains($n)) { $leaks += "$b : $($n.Substring(0, [Math]::Min(4, $n.Length)))…" }
