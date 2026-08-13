@@ -180,6 +180,20 @@ def merged_residence_years(
 
     `imputed`가 없으면(현행법 트랙 등) **인정 구간을 아예 세지 않는다.**
     근거 규칙이 없는데 인정해 주는 것이 가장 위험하다.
+
+    ★★ 요건 ➊ — **주거이전하는 날 현재 1년 이상 계속 거주 중이던 주택**만 인정한다.
+
+      상세본 p.84 (18)① — "ㅇ (요건) ➊~➌ 모두 충족 / ➊ 주거이전하는 날 현재
+      1년 이상 계속하여 거주 중인 주택일 것".
+
+      ⚠️ 2026-08-13 멀티에이전트 감사에서 잡혔다. 룰셋에 `requires_prior_residence_years:
+         1`을 담아 두고 **코드가 한 번도 읽지 않았다**(grep 결과 .py 0건). 그래서 그 집에
+         하루도 산 적 없는 사람이 근무상 형편만 적으면 거주 3년이 인정됐다.
+         요건을 **늘리는** 방향이라 과소신고다.
+
+      ⚠️ ➌(타 시·군으로 주거이전)은 **판정하지 않는다.** 이전한 지역을 입력받지
+         않는다. 요건을 좁히는 쪽이라 안 보면 유리해지므로, 상위 계층이 이 사실을
+         드러내야 한다(docs/미구현_목록.md).
     """
     real: list[tuple[date, date]] = []
     excused: list[tuple[date, date]] = []
@@ -203,6 +217,11 @@ def merged_residence_years(
 
     days = _merged_days(real)
 
+    need_prior = int((imputed or {}).get("requires_prior_residence_years", 0))
+    if need_prior > 0:
+        excused = [w for w in excused if _lived_before(real, w[0], need_prior)]
+        rebuilt = [w for w in rebuilt if _lived_before(real, w[0], need_prior)]
+
     if excused:
         cap = int((imputed or {}).get("max_years", 0)) * 365
         days += min(_merged_days(excused), cap)
@@ -212,6 +231,20 @@ def merged_residence_years(
         days += int(_merged_days(rebuilt) * ratio)
 
     return days // 365
+
+
+def _lived_before(real: Sequence[tuple[date, date]], moved_out: date, years: int) -> bool:
+    """주거이전일 직전에 **끊기지 않고** `years`년 이상 살았는가.
+
+    조문이 "1년 이상 **계속하여** 거주 중인"이라고 못 박으므로, 여기저기 흩어진
+    거주기간의 합이 아니라 **이전일에 맞닿은 한 구간**의 길이를 본다.
+    합으로 세면 10년 전에 1년 살고 떠난 집도 요건을 통과한다.
+    """
+    for start, finish in real:
+        # 이전일에 맞닿아 끝난 구간(하루 오차는 허용 — 전출입 처리 시차)
+        if abs((finish - moved_out).days) <= 1 and full_years(start, finish) >= years:
+            return True
+    return False
 
 
 def imputed_spec(

@@ -304,10 +304,25 @@ def compute_transfer_tax(
     # 보유기간을 다르게 적으면, 숫자만 바꿔 적어 비과세를 받아내는 길이 열린다.
     # 실측: 보유 1일 양도에 holding_years: 12를 적자 경고 없이 세액 0원이 나왔다.
     derived_hold = periods.holding_years(case, event.person_id, event.property_id, on)
-    derived_live = periods.residence_years(
+
+    # ★★ 인정 거주기간은 **장기거주 소득공제의 공제율 산정에만** 쓴다.
+    #
+    #   상세본 p.84 (18) 제목 — "주택 **장기거주 소득공제 적용 시** 비거주기간을
+    #   거주기간으로 인정", 신설 문언 — "주택장기거주소득공제 **공제율 산정 시**
+    #   … 보유기간을 거주기간으로 인정". 근거 조문도 소득법 §95⑦·소득령 §159의4②③
+    #   신설로, **장기보유특별공제 조항**이다. §154①(비과세 거주요건)이나
+    #   §103(기본공제)을 고치지 않는다.
+    #
+    #   ⚠️ 2026-08-13 감사에서 잡혔다. 예전에는 인정분을 포함한 값 **하나**를 만들어
+    #      비과세 요건·표2 진입요건·기본공제 10년 거주요건에까지 그대로 썼다.
+    #      그 집에 산 적 없는 사람이 근무상 형편만 적으면 비과세 12억이 열렸다.
+    #      확보한 원문 어디에도 그 확장을 허용하는 문구가 없다.
+    live_actual = periods.residence_years(case, event.person_id, event.property_id, on)
+    live_for_rate = periods.residence_years(
         case, event.person_id, event.property_id, on,
         imputed=periods.imputed_spec(ruleset, tax="transfer", on=on, track=track),
     )
+    derived_live = live_actual
     period_conflicts: list[str] = []
     if event.holding_years is not None and derived_hold is not None and event.holding_years != derived_hold:
         period_conflicts.append(
@@ -323,6 +338,9 @@ def compute_transfer_tax(
         holding_years=event.holding_years if event.holding_years is not None else derived_hold,
         residence_years=event.residence_years if event.residence_years is not None else derived_live,
     )
+    # 인정분은 **공제율에만** 얹는다. 실제 거주기간과 따로 들고 다닌다.
+    imputed_bonus = max(0, (live_for_rate or 0) - (live_actual or 0))
+    residence_for_rate = (event.residence_years or 0) + imputed_bonus
     if period_conflicts:
         children.append(
             node(
@@ -471,6 +489,7 @@ def compute_transfer_tax(
     deduction, ded_node = _long_term_deduction(
         ruleset, on, track, event, taxable_gain, one_house, heavy_applies, subject,
         sangsaeng_waives=sang_waives,
+        residence_for_rate=residence_for_rate,
     )
     children.append(ded_node)
 
@@ -1086,8 +1105,14 @@ def _long_term_deduction(
     heavy_applies: bool,
     subject: SubjectRef,
     sangsaeng_waives: bool = False,
+    residence_for_rate: int | None = None,
 ) -> tuple[Value, TraceNode]:
     """장기보유특별공제 → 개정안 「장기거주 소득공제」.
+
+    `residence_for_rate` — **공제율 산정에만** 쓰는 거주기간(부득이한 사유 인정분 포함).
+    표2 진입요건(§159의4① "거주기간이 2년 이상")에는 쓰지 않는다.
+    개편안이 인정 범위를 "장기거주 소득공제 **공제율 산정 시**"로 못 박기 때문이다
+    (상세본 p.84). 진입요건까지 밀면 그 집에 산 적 없는 사람이 표2에 들어간다.
 
     ★ 다주택자가 조정대상지역 주택을 양도하면 이 공제가 **배제**된다(소득세법 §95② 단서).
       중과와 공제 배제가 함께 오므로 세액이 두 배로 뛴다.
@@ -1168,7 +1193,10 @@ def _long_term_deduction(
             payload = res.block.payload
 
     hold_rate = _rate_for(payload.get("holding"), event.holding_years)
-    live_rate = _rate_for(payload.get("residence"), event.residence_years)
+    live_rate = _rate_for(
+        payload.get("residence"),
+        event.residence_years if residence_for_rate is None else residence_for_rate,
+    )
 
     if payload.get("mode") == "max":
         rate = max(hold_rate, live_rate)
