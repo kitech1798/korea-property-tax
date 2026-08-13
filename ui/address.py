@@ -179,7 +179,23 @@ def picker(idx: int, house: dict, year: int) -> None:
             st.warning(str(exc))
             return
         except juso.JusoError as exc:
-            st.error(f"주소 검색에 실패했습니다. 직접 입력해주세요.\n\n{exc}")
+            # ⚠️ 2026-08-13 실측 — 배포 서버(해외 IP)에서 juso가 **응답하지 않는다.**
+            #   로컬(한국 회선) 0.3초 정상 / Streamlit Cloud 20초 타임아웃.
+            #   주소정보 누리집이 해외 IP를 막는 것으로 보인다.
+            #
+            #   이걸 "실패했습니다"로만 적으면 **일시적 오류처럼 읽혀** 사용자가
+            #   계속 다시 누른다. 될 일이 아니면 될 일이 아니라고 말해야 한다.
+            if exc.code == "NETWORK":
+                st.warning(
+                    "**이 서버에서는 주소 검색이 되지 않습니다.** 공시가격을 아래에 "
+                    "직접 입력해주세요 — 계산은 그대로 됩니다.\n\n"
+                    "주소정보 누리집(juso.go.kr)이 해외에 있는 이 서버의 접속에 "
+                    "응답하지 않습니다. 앱이나 인증키 문제가 아닙니다.\n\n"
+                    "공시가격은 **부동산공시가격 알리미**(realtyprice.kr)에서 "
+                    "주소로 조회하실 수 있습니다."
+                )
+            else:
+                st.error(f"주소 검색에 실패했습니다. 직접 입력해주세요.\n\n{exc}")
             return
 
         if not matches:
