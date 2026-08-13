@@ -9,6 +9,8 @@ AppTest는 브라우저 없이 앱 스크립트를 돌리고 예외를 수집한
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 pytest.importorskip("streamlit.testing.v1")
@@ -112,6 +114,62 @@ def test_다주택_상황도_예외_없이_계산된다():
         ]
     )
     assert_clean(at)
+
+
+def _leased(**over) -> dict:
+    """임대차 이력이 있는 주택. 기본값은 상생임대 요건을 갖춘 표준 사례다."""
+    fields = {
+        "leased": True,
+        "resides": False,
+        "residence_years": 0,
+        "prior_start": date(2023, 2, 1), "prior_end": date(2025, 1, 31),
+        "prior_contracted": date(2022, 12, 10),
+        "prior_deposit": 5.0, "prior_rent": 0, "prior_origin": "새로 체결",
+        "sang_start": date(2025, 2, 1), "sang_end": date(2027, 1, 31),
+        "sang_contracted": date(2024, 12, 15),
+        "sang_deposit": 5.2, "sang_rent": 0, "sang_origin": "새로 체결",
+        "sang_evidenced": "예",
+        "tenant_ref": "임차인A",
+    }
+    fields.update(over)
+    return _house(**fields)
+
+
+def test_임대차_이력이_있어도_예외가_없다():
+    """★ 임대차를 켜면 상생임대 판정과 매도시점 최적화가 함께 돈다.
+
+    기본 화면은 임대차가 꺼져 있어 이 경로를 한 번도 타지 않는다. 이 프로젝트는
+    "테스트에 없는 분기가 335개 테스트를 통과한 채 틀려 있던" 사건을 겪었다.
+    """
+    at = run(houses=[_leased()])
+    assert_clean(at)
+
+
+def test_매도시점_화면이_실제로_그려진다():
+    """예외가 없는 것과 화면이 나오는 것은 다르다. 문구로 확인한다."""
+    at = run(houses=[_leased()])
+    assert_clean(at)
+    text = " ".join(m.value for m in at.markdown)
+    assert "언제 팔아야 하나" in text
+    assert "권장 매도일" in text or "기한과 제약" in text
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"sang_evidenced": "모름"},                      # 판정 불가
+        {"prior_origin": "집을 사면서 승계받음"},         # 직전계약 성립 안 함
+        {"sang_deposit": 6.0},                           # 증가율 20%
+        {"sang_end": date(2026, 12, 31)},                # 23개월
+        {"prior_deposit": 0.0, "sang_deposit": 0.0},     # 대가 없음 → 판정 불가
+        {"prior_end": date(2026, 1, 31)},                # 기간 겹침 → 판정 불가
+        {"sang_rent": 60},                               # 전세→월세 전환
+        {"sang_origin": "임차인이 갱신요구권 행사"},      # 요구권 소진
+    ],
+)
+def test_임대차_변형들도_화면이_버틴다(over):
+    """요건을 못 갖춘 경우가 오히려 흔하다. 그때 화면이 죽으면 아무 소용이 없다."""
+    assert_clean(run(houses=[_leased(**over)]))
 
 
 def test_부부공동명의_1주택도_예외_없이_계산된다():

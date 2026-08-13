@@ -23,6 +23,8 @@ from realestate_tax.domain import (
     HouseholdId,
     ImputedResidenceReason,
     InheritedMeta,
+    LeaseOrigin,
+    LeaseSpell,
     Ownership,
     Person,
     PersonId,
@@ -49,6 +51,7 @@ from realestate_tax.engine.regions import (
 )
 from realestate_tax.engine.deferral import check_deferral
 from realestate_tax.engine.special_houses import assess as A_ASSESS
+from realestate_tax.engine.sell_window import ConstraintKind, optimize
 from realestate_tax.engine.strategy import consult, sell_timing
 from realestate_tax.engine.trace import format_manwon
 from realestate_tax.engine.transfer_tax import (
@@ -73,6 +76,19 @@ _IMPUTED = {
     "60세 이상 직계존속 동거봉양": ImputedResidenceReason.ELDER_CARE,
     "재개발·재건축 공사기간": ImputedResidenceReason.RECONSTRUCTION,
 }
+
+# 임대차계약이 어떻게 성립했는가. 화면 문구 → 도메인 값.
+# ★ '승계'를 따로 두는 이유 — 소득세법 시행령 §155의3①1호 괄호가 "취득으로 임대인의
+#   지위가 승계된 경우의 임대차계약은 제외"한다. 세입자가 살던 집을 사서 물려받은
+#   계약은 직전임대차계약이 **될 수 없다**. 상생임대 판정에서 가장 흔한 함정이다.
+_LEASE_ORIGINS = {
+    "새로 체결": LeaseOrigin.NEW,
+    "집을 사면서 승계받음": LeaseOrigin.SUCCEEDED,
+    "묵시적 갱신": LeaseOrigin.IMPLICIT_RENEWAL,
+    "임차인이 갱신요구권 행사": LeaseOrigin.TENANT_RENEWAL_RIGHT,
+    "합의로 재계약": LeaseOrigin.AGREED_RENEWAL,
+}
+_EVIDENCED = {"예": True, "아니오": False, "모름": None}
 
 ME = PersonId("me")
 SPOUSE = PersonId("spouse")
@@ -417,6 +433,73 @@ with tab_input:
                     "확인해주시기 전에는 유리하게 가정하지 않습니다.",
                 )
 
+            # ── 임대차 이력 — 상생임대주택 특례(소득세법 시행령 §155의3) ──────
+            # 거주요건을 못 채운 사람에게 비과세 12억을 열어 주는 유일한 길이라,
+            # 실거주 0년인 주택에서는 이 입력 하나가 세액을 억 단위로 가른다.
+            h["leased"] = f.checkbox(
+                "세를 준 적이 있습니다 (상생임대 판정)", h.get("leased", False), key=f"lz{i}",
+                help="임대료를 5% 이내로만 올린 집주인은 1세대1주택 비과세와 "
+                "장기보유특별공제의 **2년 거주요건을 면제**받습니다(시행령 §155의3). "
+                "실거주하지 않은 집도 비과세가 될 수 있습니다.",
+            )
+            if h["leased"]:
+                st.caption(
+                    "직전임대차계약과 상생임대차계약 **두 건**을 비교해 판정합니다. "
+                    "상생임대차계약은 직전계약 대비 보증금·월세 인상률이 5% 이내여야 합니다."
+                )
+                for slot, title in (("prior", "직전임대차계약"), ("sang", "상생임대차계약")):
+                    st.markdown(f"**{title}**")
+                    c1, c2, c3 = st.columns(3)
+                    h[f"{slot}_start"] = c1.date_input(
+                        "임대 개시", h.get(f"{slot}_start", date(2023, 2, 1)),
+                        key=f"{slot}s{i}", min_value=date(2000, 1, 1), max_value=date(2035, 12, 31),
+                    )
+                    h[f"{slot}_end"] = c2.date_input(
+                        "임대 종료", h.get(f"{slot}_end", date(2025, 1, 31)),
+                        key=f"{slot}e{i}", min_value=date(2000, 1, 1), max_value=date(2035, 12, 31),
+                        help="계약서상 만료일입니다. **그 날까지 임대한 것**으로 셉니다.",
+                    )
+                    h[f"{slot}_contracted"] = c3.date_input(
+                        "계약 체결일", h.get(f"{slot}_contracted", date(2022, 12, 10)),
+                        key=f"{slot}c{i}", min_value=date(2000, 1, 1), max_value=date(2035, 12, 31),
+                        help="상생임대차계약은 **'21.12.20.~'26.12.31. 중 체결**이 요건입니다. "
+                        "임대 개시일이 아니라 체결일로 갈립니다.",
+                    )
+                    d1, d2, d3 = st.columns(3)
+                    h[f"{slot}_deposit"] = d1.number_input(
+                        "보증금(억원)", 0.0, 100.0, float(h.get(f"{slot}_deposit", 5.0)),
+                        step=0.1, format="%.2f", key=f"{slot}d{i}",
+                    )
+                    h[f"{slot}_rent"] = d2.number_input(
+                        "월세(만원)", 0, 5000, int(h.get(f"{slot}_rent", 0)),
+                        step=10, key=f"{slot}r{i}",
+                        help="전세면 0. ⚠️ 보증금과 월세를 **서로 전환**한 계약은 "
+                        "증가율 산식(민간임대주택법 §44④)을 확보하지 못해 판정하지 않습니다.",
+                    )
+                    _ok = list(_LEASE_ORIGINS)
+                    h[f"{slot}_origin"] = d3.selectbox(
+                        "이 계약이 생긴 경위", _ok,
+                        index=_ok.index(h.get(f"{slot}_origin", "새로 체결")),
+                        key=f"{slot}o{i}",
+                        help="**승계받은 계약은 직전임대차계약이 될 수 없습니다**"
+                        "(§155의3①1호 괄호). 상생임대 판정에서 가장 흔한 함정입니다. "
+                        "갱신요구권 행사 이력은 다음 만기에 세입자를 내보낼 수 있는지를 가릅니다.",
+                    )
+                    if slot == "sang":
+                        _ek = list(_EVIDENCED)
+                        h["sang_evidenced"] = st.selectbox(
+                            "계약금 지급이 증빙서류로 확인되나요?", _ek,
+                            index=_ek.index(h.get("sang_evidenced", "모름")),
+                            key=f"sv{i}",
+                            help="§155의3①1호가 요건으로 정합니다. "
+                            "**모르면 유리하게 가정하지 않습니다** — 확인 전에는 특례를 적용하지 않습니다.",
+                        )
+                h["tenant_ref"] = st.text_input(
+                    "임차인 구분(별칭)", h.get("tenant_ref", "임차인A"), key=f"tn{i}",
+                    help="갱신요구권은 **임차인마다 1회**입니다. 두 계약의 임차인이 같은 사람인지 "
+                    "알아야 소진 여부를 판정할 수 있습니다. 이름 대신 별칭을 쓰세요.",
+                )
+
             zone = check_regulated(h["dong"], rs, on=date(year, 6, 1), track=effective_track)
             if zone.designation is YES:
                 st.markdown(
@@ -450,7 +533,7 @@ def build_case(target_year: int) -> TaxCase:
         persons[0] = replace(persons[0], spouse_id=SPOUSE)
         members.append(SPOUSE)
 
-    props, owns, spells = [], [], []
+    props, owns, spells, leases = [], [], [], []
     for i, h in enumerate(st.session_state.houses):
         pid = PropertyId(f"h{i}")
         rental = (
@@ -521,6 +604,29 @@ def build_case(target_year: int) -> TaxCase:
                 )
             )
 
+        # 임대차 이력. **판정은 담지 않는다** — 상생임대 해당 여부도, 갱신요구권
+        # 소진 여부도 엔진이 두 계약을 비교해서 낸다. 화면은 사실만 넘긴다.
+        if h.get("leased"):
+            for slot in ("prior", "sang"):
+                leases.append(
+                    LeaseSpell(
+                        property_id=pid,
+                        start=h[f"{slot}_start"],
+                        end=h[f"{slot}_end"],
+                        contracted_on=h[f"{slot}_contracted"],
+                        deposit=int(h[f"{slot}_deposit"] * EOK),
+                        monthly_rent=int(h[f"{slot}_rent"]) * 10_000,
+                        origin=_LEASE_ORIGINS[h[f"{slot}_origin"]],
+                        # 직전계약의 증빙은 요건이 아니다(상생임대차계약만 요건).
+                        down_payment_evidenced=(
+                            _EVIDENCED[h.get("sang_evidenced", "모름")]
+                            if slot == "sang"
+                            else True
+                        ),
+                        tenant_ref=h.get("tenant_ref", ""),
+                    )
+                )
+
     return TaxCase(
         year=target_year,
         persons=tuple(persons),
@@ -528,6 +634,7 @@ def build_case(target_year: int) -> TaxCase:
         properties=tuple(props),
         ownerships=tuple(owns),
         residences=tuple(spells),
+        leases=tuple(leases),
     )
 
 
@@ -735,6 +842,92 @@ with tab_sell:
     )
     sell_case = build_case(sell_year)
     detail = compute_transfer_tax(sell_case, event, rs, track=track)
+
+    # ======================================================================
+    # 매도 시점 — 세액과 제약을 따로 본다
+    # ======================================================================
+    #
+    # ★ "세액이 가장 낮은 날"을 고르면 틀린다. 그날 팔 수 있어야 고를 수 있다.
+    #   실제 상담 사건에서 구속력이 가장 큰 기한은 세법이 아니라 주택임대차보호법
+    #   §6①(갱신거절 통지)에서 나왔고, 그 기한은 세액 곡선에 흔적조차 남지 않는다.
+    #   세법만 보고 "2028년 1월까지 팔면 됩니다"라고 답하면, 그때는 손쓸 시점이
+    #   1년 2개월 전에 이미 지나 있다.
+    if sell_case.leases:
+        st.markdown("### 언제 팔아야 하나")
+        st.caption(
+            "세액은 날짜에 대해 **계단 함수**입니다. 값이 바뀌는 곳은 법이 그은 경계뿐이라, "
+            "달력을 훑지 않고 경계를 직접 계산합니다."
+        )
+
+        _start = max(date.today(), date(2026, 1, 1))
+        _end = date(2030, 12, 31)
+        _base = optimize(sell_case, event, rs, start=_start, end=_end, track=track)
+        _renewed = optimize(
+            sell_case, event, rs, start=_start, end=_end, track=track, assume_renewal=True
+        )
+
+        if _base.best is not None:
+            _loss = (
+                _renewed.best.transfer_tax - _base.best.transfer_tax
+                if _renewed.best is not None
+                else 0
+            )
+            R.cards(
+                [
+                    ("권장 매도일", str(_base.best.on), "팔 수 있는 날 중 세금이 가장 적은 날", True),
+                    ("그날의 총부담", format_manwon(_base.best.transfer_tax), "양도세 + 지방소득세", False),
+                    (
+                        "임대차가 갱신되면",
+                        format_manwon(_renewed.best.transfer_tax) if _renewed.best else "—",
+                        f"매도일 {_renewed.best.on}로 밀림" if _renewed.best else "",
+                        False,
+                    ),
+                    ("통지를 놓친 비용", format_manwon(_loss), "두 시나리오의 차이", _loss > 0),
+                ]
+            )
+
+        _KIND_KO = {
+            ConstraintKind.DEADLINE: "기한",
+            ConstraintKind.BLOCKS: "매도 가능",
+            ConstraintKind.RISK: "확인 필요",
+        }
+        if _base.constraints:
+            st.markdown("**기한과 제약 — 먼저 오는 것이 진짜 데드라인입니다**")
+            R.table(
+                ["구분", "무엇", "언제", "근거", "해야 할 일"],
+                [
+                    [
+                        _KIND_KO[c.kind],
+                        c.label_ko,
+                        f"{c.window[0]} ~ {c.window[1]}" if c.window else str(c.on),
+                        c.basis_ko,
+                        c.action_ko,
+                    ]
+                    for c in sorted(
+                        _base.constraints, key=lambda c: c.on or date(2099, 1, 1)
+                    )
+                ],
+            )
+            for c in _base.constraints:
+                if c.kind is ConstraintKind.RISK:
+                    R.note(f"확인 필요 — {c.label_ko}", f"{c.action_ko} {c.note_ko}", "warn")
+
+        _cliffs = [c for c in _base.cliffs(threshold=1_000_000)]
+        if _cliffs:
+            st.markdown("**세액 절벽 — 하루 차이로 갈리는 자리**")
+            R.table(
+                ["이 날까지", "하루 넘기면", "늘어나는 세금"],
+                [
+                    [str(c.before), str(c.after), f"+{format_manwon(c.increase)}"]
+                    for c in _cliffs
+                ],
+            )
+            st.caption(
+                "달력을 월 단위로만 훑으면 1월 31일과 2월 1일 사이의 절벽을 통째로 놓칩니다. "
+                "그래서 각 기한일과 **그 다음 날**을 직접 계산에 넣습니다."
+            )
+
+        st.divider()
 
     st.markdown(f"### {sell_year}년에 판다면")
 
