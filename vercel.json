@@ -2,8 +2,10 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["icn1"],
   "functions": {
-    "api/juso.js": {
+    "api/juso.mjs": {
       "maxDuration": 20
     }
-  }
+  },
+  "buildCommand": "",
+  "outputDirectory": "public"
 }

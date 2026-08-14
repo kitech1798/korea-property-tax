@@ -53,6 +53,23 @@ class _Resp:
         return False
 
 
+@pytest.fixture(autouse=True)
+def _no_local_secrets(monkeypatch):
+    """★ 로컬 `.streamlit/secrets.toml`이 테스트에 새어 들어오지 않게 막는다.
+
+    `_setting()`은 환경변수가 비면 **secrets로 폴백한다.** 그래서 환경변수만
+    지우고 "설정 없음"을 시험하면, 개발자 PC에 실제 값이 있는 순간 테스트가
+    조용히 다른 것을 재게 된다 — 실제로 이 파일이 그렇게 깨졌다(2026-08-13,
+    중계 토큰을 secrets.toml에 넣은 직후).
+
+    이 저장소는 같은 착각을 이미 두 번 박아 뒀다
+    (`test_환경변수만_지우면_키_없음이_되지_않는다`). **두 통로를 다 막아야 한다.**
+    """
+    import streamlit as st
+
+    monkeypatch.setattr(st, "secrets", {}, raising=False)
+
+
 @pytest.fixture
 def capture(monkeypatch):
     """호출된 URL과 헤더를 잡아 둔다."""

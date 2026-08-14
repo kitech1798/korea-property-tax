@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>주소 중계</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #fafaf9;
+        color: #1c1917;
+        font: 16px/1.7 system-ui, -apple-system, "Segoe UI", sans-serif;
+        word-break: keep-all;
+      }
+      main { max-width: 34rem; padding: 2rem; }
+      h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+      p { margin: 0 0 0.75rem; color: #57534e; }
+      code {
+        background: #f5f5f4;
+        padding: 0.1em 0.4em;
+        border-radius: 4px;
+        font-size: 0.9em;
+      }
+      a { color: #0f766e; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>주소 중계</h1>
+      <p>
+        이 주소는 <b>부동산 보유세·양도세 상담</b> 앱이 도로명주소를 찾을 때만
+        쓰는 중계입니다. 사람이 볼 화면은 없습니다.
+      </p>
+      <p>
+        주소정보 누리집이 해외에 있는 앱 서버의 접속에 응답하지 않아,
+        서울 리전에 중계만 따로 두었습니다.
+      </p>
+      <p>
+        앱은 여기입니다 —
+        <a href="https://korea-property-tax.streamlit.app/">korea-property-tax.streamlit.app</a>
+      </p>
+      <p>
+        <code>/api/juso</code> 는 토큰 없이는 응답하지 않습니다.
+      </p>
+    </main>
+  </body>
+</html>
