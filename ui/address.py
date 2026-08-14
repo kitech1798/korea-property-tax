@@ -126,13 +126,24 @@ def _units(parcel: hub.ParcelKey, dong_nm: str) -> tuple[hub.Unit, ...]:
 
 
 @st.cache_data(ttl=DAY, show_spinner=False, max_entries=50)
-def _prices(parcel: hub.ParcelKey, _progress=None) -> tuple[hub.HousePrice, ...]:
+def _prices(parcel: hub.ParcelKey) -> tuple[hub.HousePrice, ...]:
     """단지 전건. 무거운 조회라 캐시가 핵심이다 — 같은 단지의 다음 호는 즉시 나온다.
 
-    `_progress`는 앞에 밑줄이 있어 캐시 키에서 제외된다(Streamlit 규약).
-    콜백까지 키에 들어가면 매번 다른 함수 객체라 캐시가 절대 맞지 않는다.
+    ⚠️ **진행 콜백을 받지 않는다**(2026-08-13 배포본에서 터짐).
+
+      예전에는 `_progress` 콜백을 받아 함수 **안에서** 바깥에 만든 진행바를
+      갱신했다. `_progress`는 밑줄이라 캐시 키에서는 빠졌지만, 문제는 키가 아니라
+      **캐시 재생**이었다 — Streamlit은 캐시된 호출을 다시 그릴 때 그 진행바가
+      존재한다고 보장하지 못해서 아예 막는다:
+
+          "a streamlit element is called on some layout block created outside
+           the function … incompatible with replaying the cached effect"
+
+      캐시된 함수 안에서는 화면을 건드리지 않는다. 진행 표시는 호출하는 쪽이
+      스피너로 한다. 10초짜리 조회라 퍼센트가 없어도 견딜 만하고,
+      **캐시를 잃는 쪽이 훨씬 비싸다**(같은 단지 두 번째 호가 즉시 나오는 것이 이 캐시다).
     """
-    return hub.fetch_prices(parcel, progress=_progress)
+    return hub.fetch_prices(parcel)
 
 
 def price_of(
@@ -350,25 +361,20 @@ def _continue_from(idx: int, house: dict, match: juso.AddressMatch, year: int) -
     if not st.button("이 호의 공시가격 가져오기", key=f"adr_go{idx}", type="primary"):
         return
 
-    bar = st.progress(0.0, text="공시가격을 가져오는 중…")
-
-    def tick(done: int, total: int) -> None:
-        # 진행 표시가 없으면 사용자는 멈춘 줄 안다. 남은 페이지를 그대로 보여준다.
-        bar.progress(min(done / max(total, 1), 1.0), text=f"공시가격 {done}/{total}")
-
+    # ⚠️ 진행바를 캐시된 함수 안에서 갱신하면 Streamlit이 막는다(위 `_prices` 주석).
+    #   진행 표시는 **호출하는 쪽**에서 한다. 퍼센트 대신 걸리는 시간을 미리 말해
+    #   "멈춘 줄 아는" 것을 막는다 — 그게 진행바의 원래 목적이었다.
     try:
-        prices = _prices(probe.parcel, _progress=tick)
+        with st.spinner("단지 전체의 공시가격을 읽는 중… 10초쯤 걸립니다."):
+            prices = _prices(probe.parcel)
     except hub.RateLimited as exc:
-        bar.empty()
         st.warning(str(exc))
         _apply_dong_only(idx, house, match)
         return
     except Exception as exc:
-        bar.empty()
         st.error(f"공시가격 조회에 실패했습니다. 직접 입력해주세요.\n\n{exc}")
         _apply_dong_only(idx, house, match)
         return
-    bar.empty()
 
     found = price_of(prices, unit.mgm_pk, year)
     if found is None:

@@ -137,6 +137,30 @@ def _leased(**over) -> dict:
     return _house(**fields)
 
 
+def test_캐시된_조회는_화면_요소를_받지_않는다():
+    """★ 2026-08-13 배포본에서 터진 것.
+
+    `@st.cache_data` 함수 **안에서** 바깥에 만든 진행바를 갱신했다. Streamlit은
+    캐시된 호출을 다시 그릴 때 그 요소가 존재한다고 보장하지 못해 아예 막는다:
+
+        "a streamlit element is called on some layout block created outside
+         the function … incompatible with replaying the cached effect"
+
+    오프라인 테스트로는 안 잡힌다 — 실제로 캐시가 채워지고 재생돼야 나온다.
+    그래서 **구조**를 못박는다: 캐시된 조회 함수는 콜백을 받지 않는다.
+    """
+    import inspect
+
+    from ui import address
+
+    for name in ("_prices", "_units", "_probe", "_search", "_dongs"):
+        fn = getattr(address, name)
+        raw = getattr(fn, "__wrapped__", fn)
+        params = list(inspect.signature(raw).parameters)
+        bad = [p for p in params if "progress" in p or "callback" in p or "bar" in p]
+        assert not bad, f"{name}가 화면 콜백을 받는다: {bad}"
+
+
 def test_임대차_이력이_있어도_예외가_없다():
     """★ 임대차를 켜면 상생임대 판정과 매도시점 최적화가 함께 돈다.
 
