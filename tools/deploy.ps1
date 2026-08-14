@@ -139,5 +139,12 @@ if ($remoteHead -ne $local) {
     Write-Host "원격이 $remoteHead 로 다릅니다. 배포를 확인하세요." -ForegroundColor Red
     exit 1
 }
-Write-Host "배포 완료 — $local" -ForegroundColor Green
-Write-Host "  https://korea-property-tax.streamlit.app/ 는 몇 분 뒤 갱신됩니다."
+Write-Host "푸시 완료 — $local" -ForegroundColor Green
+Write-Host ""
+# ⚠️ 2026-08-13 — Streamlit Cloud가 푸시를 **자동으로 물어오지 않는다.** 하루에 네 번
+#    같은 자리에서 헤맸다(ImportError·MissingRule·옛 화면 문구·캐시 오류). 전부
+#    "코드가 틀렸나"를 의심하다 배포가 안 됐던 것으로 끝났다.
+#    푸시는 배포가 아니다. 그 사실을 매번 화면에 적는다.
+Write-Host "  ⚠️ 푸시는 배포가 아닙니다. Streamlit Cloud는 새 커밋을 자동으로 안 가져옵니다." -ForegroundColor Yellow
+Write-Host "     https://share.streamlit.io -> korea-property-tax -> [...] -> Reboot app" -ForegroundColor Yellow
+Write-Host "     리붓 뒤 사이드바의 '빌드' 값이 $($local.Substring(0,7)) 인지 확인하세요." -ForegroundColor Yellow
