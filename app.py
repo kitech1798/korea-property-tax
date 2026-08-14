@@ -14,6 +14,7 @@ import os
 from dataclasses import replace
 from datetime import date
 from fractions import Fraction
+from pathlib import Path
 
 import streamlit as st
 
@@ -153,6 +154,36 @@ def _secret_near(name: str) -> str | None:
     return None
 
 
+@st.cache_data(show_spinner=False)
+def build_ref() -> str:
+    """지금 돌고 있는 코드가 **어느 커밋인지**.
+
+    ★ 2026-08-13에 이걸 몰라서 세 번 헤맸다. 배포 플랫폼이 새 커밋을 물어오지
+      않는 일이 실제로 있었고(GitHub은 최신인데 Cloud는 4커밋 뒤), 화면만 보고는
+      "코드가 틀렸나, 배포가 안 됐나"를 가를 수 없었다.
+
+      찍어 두면 그 질문이 30초에 끝난다. 오류를 보고할 때도 이 값 하나면
+      어느 코드인지 확정된다.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    # git이 없는 배포 환경도 있다. 그때는 배포 스크립트가 남긴 파일을 읽는다.
+    marker = Path(__file__).resolve().parent / "VERSION"
+    if marker.exists():
+        return marker.read_text(encoding="utf-8").strip()[:40] or "미상"
+    return "미상"
+
+
 _bootstrap_keys()
 
 
@@ -208,6 +239,11 @@ with st.sidebar:
     st.divider()
     st.caption(f"룰셋 `{rs.version}` · 해시 `{rs.content_hash}`")
     st.caption(f"규칙 {len(rs)}건")
+    # ⚠️ 2026-08-13 — **어느 빌드가 도는지 몰라 세 번 헤맸다.**
+    #   배포 플랫폼이 새 커밋을 안 물어오는 일이 실제로 있었다(Cloud가 4커밋 뒤처짐).
+    #   그때 화면만 보고는 "코드가 틀렸나 배포가 안 됐나"를 가를 수 없었다.
+    #   커밋을 찍어 두면 그 질문이 30초 만에 끝난다.
+    st.caption(f"빌드 `{build_ref()}`")
 
 
 # ==========================================================================
