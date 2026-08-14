@@ -23,6 +23,7 @@ import streamlit as st
 
 from realestate_tax.sources import building_hub as hub
 from realestate_tax.sources import juso
+from realestate_tax.sources import region_code
 from realestate_tax.sources import resolve
 
 DAY = 60 * 60 * 24
@@ -140,6 +141,84 @@ def price_of(
     return (best.price, best.year or 0)
 
 
+@st.cache_data(ttl=DAY, show_spinner=False, max_entries=200)
+def _dongs(keyword: str) -> tuple[region_code.RegionMatch, ...]:
+    return tuple(region_code.search_dong(keyword))
+
+
+def _by_dong_and_parcel(idx: int, house: dict) -> None:
+    """juso 없이 사슬을 잇는다 — **법정동은 API가, 지번은 사용자가.**
+
+    ★ 2026-08-13. juso가 해외 IP에 응답하지 않아 도로명 검색이 죽었다. 그런데
+      자동조회에 필요한 두 값 중 **법정동코드는 도달 가능한 호스트**
+      (`apis.data.go.kr`)에서 받을 수 있고, **지번은 사용자가 안다** —
+      등기부·계약서에 적혀 있다.
+
+      그래서 편의 하나(주소 한 줄)를 잃되 **사슬 전체를 잃지는 않는다.**
+      법정동코드만 채워도 조정대상지역 판정이 살아나고, 지번까지 넣으면
+      동·호·공시가격이 그대로 자동으로 채워진다.
+    """
+    kw = st.text_input(
+        "법정동 이름",
+        key=f"adr_dq{idx}",
+        placeholder="예) 대치동   /   천안시 동남구 신부동",
+        help="**도로명은 찾지 못합니다.** 동 이름으로 넣어주세요. "
+        "같은 이름이 여러 시·군에 있으면 시·군을 앞에 붙이시면 좁혀집니다.",
+    )
+    if not kw or len(kw.strip()) < 2:
+        return
+
+    try:
+        with st.spinner("법정동을 찾는 중…"):
+            found = _dongs(kw.strip())
+    except region_code.RegionCodeError as exc:
+        st.error(f"법정동 검색에 실패했습니다. 공시가격을 직접 입력해주세요.\n\n{exc}")
+        return
+
+    if not found:
+        st.info(
+            "검색 결과가 없습니다. **동 이름**으로 넣어주세요 — 도로명(예: 북일로)은 "
+            "이 검색에서 찾지 못합니다."
+        )
+        return
+
+    labels = [m.label_ko for m in found]
+    pick = st.selectbox("법정동 선택", range(len(found)), format_func=lambda i: labels[i],
+                        key=f"adr_dsel{idx}")
+    region = found[pick]
+
+    # 법정동코드만으로도 얻는 게 있다 — 조정대상지역 판정이 살아난다.
+    house["dong"] = region.code
+    house["src"] = f"법정동 검색 · {region.name}"
+    st.success(f"법정동코드 {region.code} — {region.name}")
+
+    c1, c2, c3 = st.columns([1, 1, 1])
+    bun = c1.number_input("지번 본번", 0, 9999, 0, key=f"adr_bun{idx}",
+                          help="등기부·계약서의 '○○○-△△'에서 앞 숫자입니다. 0이면 건너뜁니다.")
+    ji = c2.number_input("부번", 0, 9999, 0, key=f"adr_ji{idx}",
+                         help="'-' 뒤 숫자. 없으면 0.")
+    mountain = c3.checkbox("산", key=f"adr_mt{idx}", help="'산 12-3'처럼 산으로 시작하면 체크")
+
+    if bun <= 0:
+        st.caption(
+            "지번을 넣으시면 동·호·공시가격까지 자동으로 채웁니다. "
+            "지금은 법정동코드만 반영됐습니다 — 공시가격은 아래에 직접 입력해주세요."
+        )
+        return
+
+    # juso가 주던 것과 같은 모양으로 만들어 **같은 사슬**에 태운다.
+    # 새 경로를 따로 파면 두 경로가 서로 다르게 굴러 유지가 안 된다.
+    synthetic = juso.AddressMatch(
+        road_addr=region.name,
+        jibun_addr=f"{region.name} {int(bun)}" + (f"-{int(ji)}" if ji else ""),
+        legal_dong_code=region.code,
+        lnbr_mnnm=int(bun),
+        lnbr_slno=int(ji),
+        mt_yn="1" if mountain else "0",
+    )
+    _continue_from(idx, house, synthetic)
+
+
 # --------------------------------------------------------------------------
 # 위젯
 # --------------------------------------------------------------------------
@@ -186,14 +265,14 @@ def picker(idx: int, house: dict, year: int) -> None:
             #   이걸 "실패했습니다"로만 적으면 **일시적 오류처럼 읽혀** 사용자가
             #   계속 다시 누른다. 될 일이 아니면 될 일이 아니라고 말해야 한다.
             if exc.code == "NETWORK":
-                st.warning(
-                    "**이 서버에서는 주소 검색이 되지 않습니다.** 공시가격을 아래에 "
-                    "직접 입력해주세요 — 계산은 그대로 됩니다.\n\n"
+                st.info(
+                    "**도로명주소 검색이 이 서버에서는 되지 않습니다.** "
                     "주소정보 누리집(juso.go.kr)이 해외에 있는 이 서버의 접속에 "
-                    "응답하지 않습니다. 앱이나 인증키 문제가 아닙니다.\n\n"
-                    "공시가격은 **부동산공시가격 알리미**(realtyprice.kr)에서 "
-                    "주소로 조회하실 수 있습니다."
+                    "응답하지 않습니다 — 앱이나 인증키 문제가 아닙니다.\n\n"
+                    "대신 **법정동 + 지번**으로 찾겠습니다. 등기부·계약서에 적힌 "
+                    "지번을 넣으시면 그 다음(동·호·공시가격)은 그대로 자동으로 채워집니다."
                 )
+                _by_dong_and_parcel(idx, house)
             else:
                 st.error(f"주소 검색에 실패했습니다. 직접 입력해주세요.\n\n{exc}")
             return
@@ -206,87 +285,97 @@ def picker(idx: int, house: dict, year: int) -> None:
         pick = st.selectbox("주소 선택", range(len(matches)), format_func=lambda i: labels[i],
                             key=f"adr_sel{idx}")
         match = matches[pick]
+        _continue_from(idx, house, match, year)
 
-        with st.spinner("건축물대장을 확인하는 중…"):
-            probe = _probe(match)
 
-        if not probe.ok or probe.parcel is None:
-            st.warning(probe.message_ko())
-            _apply_dong_only(idx, house, match)
-            return
-        if not probe.has_house:
-            st.warning(probe.message_ko())
-            return
+def _continue_from(idx: int, house: dict, match: juso.AddressMatch, year: int) -> None:
+    """필지가 정해진 뒤의 사슬 — 표제부 → 동 → 호 → 공시가격.
 
-        st.success(f"{probe.message_ko()}  ·  지번 {probe.hint.label_ko if probe.hint else ''}")
+    ★ 도로명 검색(juso)과 법정동+지번 입력, **두 입구가 여기서 만난다.**
+      juso가 해외 IP에 막혀 두 번째 입구를 만들 때, 뒤쪽 사슬을 복사하지 않고
+      함수로 뽑았다. 복사했다면 두 경로가 서로 다르게 굴러 유지가 안 된다 —
+      이 저장소가 '규칙은 모든 출구에 건다'로 배운 것과 같은 이야기다.
+    """
+    with st.spinner("건축물대장을 확인하는 중…"):
+        probe = _probe(match)
 
-        dongs = probe.dong_names
-        dong = ""
-        if dongs:
-            dong = st.selectbox("동", dongs, key=f"adr_dong{idx}")
+    if not probe.ok or probe.parcel is None:
+        st.warning(probe.message_ko())
+        _apply_dong_only(idx, house, match)
+        return
+    if not probe.has_house:
+        st.warning(probe.message_ko())
+        return
 
-        with st.spinner(f"{dong or '건물'}의 호 목록을 가져오는 중…"):
-            try:
-                units = _units(probe.parcel, dong)
-            except Exception as exc:
-                st.error(f"호 목록 조회에 실패했습니다. 직접 입력해주세요.\n\n{exc}")
-                return
+    st.success(f"{probe.message_ko()}  ·  지번 {probe.hint.label_ko if probe.hint else ''}")
 
-        if not units:
-            st.warning("이 동의 호 정보가 없습니다. 공시가격을 직접 입력해주세요.")
-            _apply_dong_only(idx, house, match)
-            return
+    dongs = probe.dong_names
+    dong = ""
+    if dongs:
+        dong = st.selectbox("동", dongs, key=f"adr_dong{idx}")
 
-        ho_labels = [
-            f"{u.ho_nm}" + (f"  ({u.area_m2:.2f}㎡)" if u.area_m2 else "") for u in units
-        ]
-        hi = st.selectbox("호", range(len(units)), format_func=lambda i: ho_labels[i],
-                          key=f"adr_ho{idx}")
-        unit = units[hi]
-
-        st.caption(
-            "다음 단계는 단지 전체의 공시가격 이력을 한 번 읽습니다. "
-            "**같은 단지의 다른 호는 그 뒤로 즉시 나옵니다.**"
-        )
-        if not st.button("이 호의 공시가격 가져오기", key=f"adr_go{idx}", type="primary"):
-            return
-
-        bar = st.progress(0.0, text="공시가격을 가져오는 중…")
-
-        def tick(done: int, total: int) -> None:
-            # 진행 표시가 없으면 사용자는 멈춘 줄 안다. 남은 페이지를 그대로 보여준다.
-            bar.progress(min(done / max(total, 1), 1.0), text=f"공시가격 {done}/{total}")
-
+    with st.spinner(f"{dong or '건물'}의 호 목록을 가져오는 중…"):
         try:
-            prices = _prices(probe.parcel, _progress=tick)
-        except hub.RateLimited as exc:
-            bar.empty()
-            st.warning(str(exc))
-            _apply_dong_only(idx, house, match)
-            return
+            units = _units(probe.parcel, dong)
         except Exception as exc:
-            bar.empty()
-            st.error(f"공시가격 조회에 실패했습니다. 직접 입력해주세요.\n\n{exc}")
-            _apply_dong_only(idx, house, match)
+            st.error(f"호 목록 조회에 실패했습니다. 직접 입력해주세요.\n\n{exc}")
             return
+
+    if not units:
+        st.warning("이 동의 호 정보가 없습니다. 공시가격을 직접 입력해주세요.")
+        _apply_dong_only(idx, house, match)
+        return
+
+    ho_labels = [
+        f"{u.ho_nm}" + (f"  ({u.area_m2:.2f}㎡)" if u.area_m2 else "") for u in units
+    ]
+    hi = st.selectbox("호", range(len(units)), format_func=lambda i: ho_labels[i],
+                      key=f"adr_ho{idx}")
+    unit = units[hi]
+
+    st.caption(
+        "다음 단계는 단지 전체의 공시가격 이력을 한 번 읽습니다. "
+        "**같은 단지의 다른 호는 그 뒤로 즉시 나옵니다.**"
+    )
+    if not st.button("이 호의 공시가격 가져오기", key=f"adr_go{idx}", type="primary"):
+        return
+
+    bar = st.progress(0.0, text="공시가격을 가져오는 중…")
+
+    def tick(done: int, total: int) -> None:
+        # 진행 표시가 없으면 사용자는 멈춘 줄 안다. 남은 페이지를 그대로 보여준다.
+        bar.progress(min(done / max(total, 1), 1.0), text=f"공시가격 {done}/{total}")
+
+    try:
+        prices = _prices(probe.parcel, _progress=tick)
+    except hub.RateLimited as exc:
         bar.empty()
+        st.warning(str(exc))
+        _apply_dong_only(idx, house, match)
+        return
+    except Exception as exc:
+        bar.empty()
+        st.error(f"공시가격 조회에 실패했습니다. 직접 입력해주세요.\n\n{exc}")
+        _apply_dong_only(idx, house, match)
+        return
+    bar.empty()
 
-        found = price_of(prices, unit.mgm_pk, year)
-        if found is None:
-            st.warning(
-                f"{unit.ho_nm}의 공시가격이 대장에 없습니다. 신축이거나 공시 전일 수 있습니다 — "
-                "직접 입력해주세요."
-            )
-            _apply_dong_only(idx, house, match)
-            return
+    found = price_of(prices, unit.mgm_pk, year)
+    if found is None:
+        st.warning(
+            f"{unit.ho_nm}의 공시가격이 대장에 없습니다. 신축이거나 공시 전일 수 있습니다 — "
+            "직접 입력해주세요."
+        )
+        _apply_dong_only(idx, house, match)
+        return
 
-        amount, base_year = found
-        _apply(idx, house, match, amount)
-        note = f"{probe.complex_name} {dong}동 {unit.ho_nm} · {base_year}년 공시"
-        if base_year != year:
-            note += f" (요청하신 {year}년 값이 아직 없어 최신 공시를 넣었습니다)"
-        st.session_state[f"src{idx}"] = note
-        st.rerun()
+    amount, base_year = found
+    _apply(idx, house, match, amount)
+    note = f"{probe.complex_name} {dong}동 {unit.ho_nm} · {base_year}년 공시"
+    if base_year != year:
+        note += f" (요청하신 {year}년 값이 아직 없어 최신 공시를 넣었습니다)"
+    st.session_state[f"src{idx}"] = note
+    st.rerun()
 
 
 def _apply(idx: int, house: dict, match: juso.AddressMatch, price: int) -> None:
