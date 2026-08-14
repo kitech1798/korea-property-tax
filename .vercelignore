@@ -1,0 +1,24 @@
+# Vercel은 `api/juso.js` 중계 하나만 올린다. 앱 본체는 Streamlit Cloud가 돌린다.
+#
+# ⚠️ `requirements.txt`가 보이면 Vercel이 파이썬 프로젝트로 잡고 streamlit까지
+#    설치하려 든다. 중계는 Node 내장 fetch만 쓰므로 의존성이 0이어야 한다.
+#    그래서 **앱 파일을 아예 안 보이게** 한다.
+
+realestate_tax/
+ui/
+tests/
+sim/
+tools/
+hooks/
+corpus/
+rulesets/
+docs/
+.streamlit/
+세제개편안_8.3/
+
+app.py
+conftest.py
+requirements.txt
+pytest.ini
+README.md
+_RESUME.md

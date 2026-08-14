@@ -317,14 +317,19 @@ def search_address(
 
 def _confm_key(explicit: str | None) -> str:
     key = explicit or os.environ.get("JUSO_CONFM_KEY")
-    if not key:
-        raise JusoError(
-            "NO_KEY",
-            "승인키가 없다. 환경변수 JUSO_CONFM_KEY를 설정하거나 confm_key 인자로 넘겨라.\n"
-            "  신청: https://business.juso.go.kr → 주소정보 자료제공 → 주소정보 API 연계\n"
-            "  (개발승인키는 본인인증 없이 즉시 발급)",
-        )
-    return key
+    if key:
+        return key
+    # 중계를 쓰면 승인키는 **중계에만** 있다. 여기서 키를 요구하면 키를 두 곳에
+    # 두게 되고, 두 곳에 있으면 두 곳에서 샌다. `_get`이 confmKey를 떼고 보낸다.
+    if proxy_config():
+        return ""
+    raise JusoError(
+        "NO_KEY",
+        "승인키가 없다. 환경변수 JUSO_CONFM_KEY를 설정하거나 confm_key 인자로 넘겨라.\n"
+        "  신청: https://business.juso.go.kr → 주소정보 자료제공 → 주소정보 API 연계\n"
+        "  (개발승인키는 본인인증 없이 즉시 발급)\n"
+        "  또는 서울 리전 중계를 쓴다 — JUSO_PROXY_URL·JUSO_PROXY_TOKEN (README 배포 절 참조)",
+    )
 
 
 def parse(payload: Mapping[str, Any]) -> tuple[DetailAddress, ...]:
@@ -376,10 +381,52 @@ def search(
     return parse(_get(BASE, params))
 
 
+def _setting(name: str) -> str:
+    value = os.environ.get(name, "")
+    if value:
+        return value
+    try:  # 배포 환경은 secrets로 온다
+        import streamlit as st
+
+        return str(st.secrets.get(name, "") or "")
+    except Exception:
+        return ""
+
+
+def proxy_config() -> tuple[str, str] | None:
+    """(중계 URL, 토큰). **둘 다** 있어야 쓴다.
+
+    ★ 왜 중계가 필요한가 — **juso가 해외 IP에 응답하지 않는다**(2026-08-13 실측:
+      한국 회선 0.3초 정상 / 미국 AWS 20초 타임아웃). 앱은 해외 PaaS에 있다.
+      앱을 국내로 옮기는 대신 **중계만 서울 리전에 둔다**
+      (`api/juso.js` + `vercel.json`의 `"regions": ["icn1"]`).
+
+    ★ 승인키는 중계에만 둔다. 여기서는 검색어만 보낸다 — 키가 두 곳에 있으면
+      두 곳에서 샌다.
+
+    토큰이 없으면 중계를 **쓰지 않는다.** 토큰 없이 부르면 중계가 401을 주는데,
+    그걸 네트워크 오류로 오해하면 원인을 못 찾는다.
+    """
+    url = _setting("JUSO_PROXY_URL")
+    token = _setting("JUSO_PROXY_TOKEN")
+    return (url, token) if url and token else None
+
+
 def _get(base: str, params: Mapping[str, str]) -> dict[str, Any]:
     """GET 후 JSON 파싱. 차단 응답을 오해하지 않도록 원인을 짚어준다."""
-    url = f"{base}?" + urllib.parse.urlencode(dict(params), encoding="utf-8")
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    proxy = proxy_config()
+    headers = {"User-Agent": USER_AGENT}
+    if proxy:
+        proxy_url, token = proxy
+        # 중계에는 **경로 이름만** 넘긴다. 전체 URL을 넘기면 아무 데나 요청을
+        # 보내주는 도구가 된다(SSRF). 중계 쪽에서도 화이트리스트로 한 번 더 막는다.
+        forwarded = {k: v for k, v in dict(params).items() if k != "confmKey"}
+        forwarded["path"] = base.rsplit("/", 1)[-1]
+        url = f"{proxy_url}?" + urllib.parse.urlencode(forwarded, encoding="utf-8")
+        headers["x-proxy-token"] = token
+    else:
+        url = f"{base}?" + urllib.parse.urlencode(dict(params), encoding="utf-8")
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             raw = resp.read().decode("utf-8", errors="replace")

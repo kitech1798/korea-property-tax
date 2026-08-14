@@ -91,7 +91,17 @@ def setup_guide_ko(missing: list[str]) -> str:
 
 
 def keys_ready() -> tuple[bool, list[str]]:
-    missing = [k for k in ISSUERS if not os.environ.get(k)]
+    """자동조회에 필요한 키가 다 있는가.
+
+    ★ 서울 리전 중계를 쓰면 **juso 승인키는 이 서버에 없다** — 중계에만 있다.
+      그때도 "키가 없습니다"라고 하면, 멀쩡히 동작하는 설정을 두고 사용자가
+      키를 다시 발급받으러 간다.
+    """
+    proxied = juso.proxy_config() is not None
+    missing = [
+        k for k in ISSUERS
+        if not os.environ.get(k) and not (proxied and k == "JUSO_CONFM_KEY")
+    ]
     return (not missing, missing)
 
 
